@@ -19,8 +19,10 @@ import {
 import { JAR_PAD, JAR_TEX_H, JAR_TEX_W, drawBackground, drawGlow, drawJarBack, drawJarFront } from './paint';
 import { Sound } from './audio';
 import { Motion } from './motion';
-import { Fx, MERGE_DELAY } from './fx';
-import { load, save } from './store';
+import { Confetti, Fx, MERGE_DELAY } from './fx';
+import { MILESTONES, freshBank, load, milestoneFloor, save } from './store';
+import { deletePhoto, drawReveal, getPhoto, loadBitmap, putPhoto } from './photo';
+import { Sheet, type SheetValues } from './sheet';
 
 const S = 50; // virtual px per physics unit
 const G = 75; // base gravity, units/s^2 (stylised: faster than real for a snappier fall)
@@ -36,6 +38,13 @@ const PENTATONIC = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24, 26, 28, 31];
 const LUCKY_CHANCE_ADD = 0.04;
 const LUCKY_CHANCE_POUR = 0.004;
 const MAX_LUCKY = 12;
+const SLIDE_OUT = 0.18;
+const SLIDE_IN = 0.42;
+const MILESTONE_TEXT: Record<number, string> = {
+  25: 'Четверть пути!',
+  50: 'Половина! Так держать',
+  75: 'Осталось совсем немного',
+};
 
 interface Coin {
   body: RigidBody;
@@ -85,7 +94,9 @@ async function boot() {
   const glowTex = Texture.from(drawGlow());
   const glow = new Sprite(glowTex);
   const fx = new Fx();
+  const confetti = new Confetti();
   const jarBack = new Sprite();
+  const photo = new Sprite();
   const coinLayer = new Container();
   const jarFront = new Sprite();
   glow.blendMode = 'add';
@@ -93,11 +104,12 @@ async function boot() {
   glow.position.set(JAR.W / 2, JAR.H * 0.74);
   glow.width = JAR.W * 1.7;
   glow.height = JAR.H * 0.95;
-  for (const s of [jarBack, jarFront]) {
+  for (const s of [jarBack, photo, jarFront]) {
     s.position.set(-JAR_PAD, -JAR_PAD);
   }
-  world.addChild(glow, jarBack, coinLayer, jarFront, fx.layer);
-  app.stage.addChild(bg, world);
+  photo.visible = false;
+  world.addChild(glow, jarBack, photo, coinLayer, jarFront, fx.layer);
+  app.stage.addChild(bg, world, confetti.layer);
   const pivotY = JAR.H * 0.6;
   world.pivot.set(JAR.W / 2, pivotY);
 
@@ -167,9 +179,50 @@ async function boot() {
     setTimeout(() => old.forEach((t) => t.destroy(true)), 1000);
   }
 
+  // Goal photo, re-baked when progress moves by a step (throttled: baking is not free)
+  let photoImg: ImageBitmap | null = null;
+  let photoP = -1;
+  let photoBakedAt = 0;
+  let photoToken = 0;
+  function paintPhoto(force = false) {
+    if (!photoImg) return;
+    const b = bank();
+    const p = clamp(b.target > 0 ? shown / b.target : 0, 0, 1);
+    const step = Math.round(p * 40) / 40;
+    const now = performance.now();
+    if (!force && (step === photoP || now - photoBakedAt < 160)) return;
+    photoP = step;
+    photoBakedAt = now;
+    swap(photo, drawReveal(photoImg, step, Math.min(res, 2)));
+    photo.width = JAR_TEX_W;
+    photo.height = JAR_TEX_H;
+    photo.alpha = 0.75 + 0.25 * step;
+    photo.visible = true;
+  }
+  async function loadPhoto() {
+    const token = ++photoToken;
+    const b = bank();
+    photoImg?.close();
+    photoImg = null;
+    photo.visible = false;
+    photoP = -1;
+    if (!b.photo) return;
+    const blob = await getPhoto(b.id);
+    const img = blob ? await loadBitmap(blob).catch(() => null) : null;
+    if (token !== photoToken) {
+      img?.close();
+      return;
+    }
+    photoImg = img;
+    paintPhoto(true);
+  }
+
+  let baseX = 0;
+  let vw = wrap.clientWidth;
+  let vh = wrap.clientHeight;
   function layout() {
-    const vw = wrap.clientWidth;
-    const vh = wrap.clientHeight;
+    vw = wrap.clientWidth;
+    vh = wrap.clientHeight;
     const top = $('hud').getBoundingClientRect().bottom + 10;
     const bottom = $('controls').getBoundingClientRect().top - 8;
     const availH = Math.max(160, bottom - top);
@@ -178,7 +231,8 @@ async function boot() {
     scale = Math.min((vw - 16) / sceneW, availH / sceneH, 1.7);
     world.scale.set(scale);
     const jarTop = top + (availH - sceneH * scale) / 2 + 4 * scale;
-    world.position.set(Math.round(vw / 2), Math.round(jarTop + pivotY * scale));
+    baseX = Math.round(vw / 2);
+    world.position.set(baseX, Math.round(jarTop + pivotY * scale));
     res = Math.min(3, scale * app.renderer.resolution);
 
     const bgRes = Math.min(2, app.renderer.resolution);
@@ -188,6 +242,7 @@ async function boot() {
     swap(jarBack, drawJarBack(res));
     paintJar();
     paintCoins();
+    paintPhoto(true);
   }
 
   // Coins
@@ -497,7 +552,7 @@ async function boot() {
     $('target').textContent = fmt.format(b.target);
     $('barFill').style.width = `${clamp(pct, 0, 1) * 100}%`;
     $('goalName').textContent = b.name;
-    glow.alpha = 0.12 + clamp(pct, 0, 1) * 0.55;
+    glow.alpha = 0.12 + clamp(pct, 0, 1) * 0.55 + flash * 0.9;
   }
 
   // Pour button
@@ -586,7 +641,10 @@ async function boot() {
   let keyTilt = 0;
   wrap.addEventListener('pointerdown', (e) => {
     sound.unlock();
-    if (motion.active) return;
+    if (motion.active) {
+      startSwipe(e);
+      return;
+    }
     drag = { x: e.clientX, id: e.pointerId };
     wrap.setPointerCapture(e.pointerId);
   });
@@ -603,70 +661,224 @@ async function boot() {
     else if (e.code === 'ArrowRight') keyTilt = 1.1;
     else if (e.code === 'Space' && !e.repeat) shake(1, true);
     else if (e.code === 'ArrowUp') add(10);
+    else if (e.code === 'BracketLeft' || e.code === 'PageUp') step(-1);
+    else if (e.code === 'BracketRight' || e.code === 'PageDown') step(1);
   });
   window.addEventListener('keyup', (e) => {
     if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') keyTilt = 0;
   });
 
-  // Settings
-  // Settings. Reset is confirmed by a second tap inside the sheet: native confirm() is
-  // suppressed in some webviews and standalone PWAs, where it silently returns false.
-  const dialog = $<HTMLDialogElement>('settings');
-  const resetBtn = $<HTMLButtonElement>('resetBtn');
-  let resetTimer = 0;
-  const disarmReset = () => {
-    clearTimeout(resetTimer);
-    resetBtn.classList.remove('armed');
-    resetBtn.textContent = 'Обнулить';
+  // Several banks: one physics world, coins are swapped in and out on switch
+  function clearJar() {
+    [...coins].forEach((c) => removeCoin(c));
+    pending.length = 0;
+    combo = 0;
+    comboLeft = 0;
+    comboEl.classList.remove('show');
+  }
+
+  function loadBank(id: string, keepOld: boolean) {
+    if (keepOld) persist();
+    stopPour();
+    clearJar();
+    state.current = id;
+    save(state);
+    sound.muteUntil = performance.now() + 700;
+    for (const [type, x, y, a] of bank().coins) {
+      if (COIN_TYPES[type]) addCoin(type, x, y, 0, 0, a, 0);
+    }
+    shown = 0; // count up again: switching is a small reward too
+    paintJar();
+    void loadPhoto();
+    renderLucky();
+    renderPager();
+  }
+
+  let slide: { t: number; dir: number; to: string | null; keepOld: boolean } | null = null;
+  let slideX = 0;
+  function switchTo(id: string, dir: number, keepOld = true) {
+    if (slide || id === state.current) return;
+    slide = { t: 0, dir, to: id, keepOld };
+    sound.unlock();
+    sound.chime(dir > 0 ? 7 : 0, 0.12, dir * 0.5);
+  }
+  function step(dir: number) {
+    const i = state.banks.findIndex((b) => b.id === state.current);
+    const next = state.banks[i + dir];
+    if (next) switchTo(next.id, dir);
+    else jiggle = Math.min(1, jiggle + 0.4);
+  }
+  function tickSlide(dt: number) {
+    if (!slide) return;
+    slide.t += dt;
+    if (slide.to) {
+      const k = Math.min(1, slide.t / SLIDE_OUT);
+      slideX = -slide.dir * vw * k * k;
+      if (k >= 1) {
+        loadBank(slide.to, slide.keepOld);
+        slide.to = null;
+        slide.t = 0;
+        slideX = slide.dir * vw;
+      }
+    } else {
+      const k = Math.min(1, slide.t / SLIDE_IN);
+      const c = 1.4;
+      const e = 1 + (c + 1) * Math.pow(k - 1, 3) + c * Math.pow(k - 1, 2); // ease-out-back
+      slideX = slide.dir * vw * (1 - e);
+      if (k >= 1) {
+        slide = null;
+        slideX = 0;
+      }
+    }
+  }
+
+  const pager = $('pager');
+  function renderPager() {
+    pager.replaceChildren();
+    const cur = state.banks.findIndex((b) => b.id === state.current);
+    state.banks.forEach((b, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'dot';
+      btn.classList.toggle('cur', i === cur);
+      btn.classList.toggle('done', b.amount >= b.target);
+      btn.setAttribute('aria-label', b.name);
+      btn.addEventListener('click', () => switchTo(b.id, i > cur ? 1 : -1));
+      pager.appendChild(btn);
+    });
+    const add = document.createElement('button');
+    add.className = 'add';
+    add.setAttribute('aria-label', 'Новая копилка');
+    add.innerHTML = '<span>+</span>';
+    add.addEventListener('click', () => sheet.open('create'));
+    pager.appendChild(add);
+  }
+
+  // Swipe between banks: on the HUD always, on the jar only when the tilt sensor owns the jar
+  let swipe: { x: number; y: number; id: number } | null = null;
+  const startSwipe = (e: PointerEvent) => (swipe = { x: e.clientX, y: e.clientY, id: e.pointerId });
+  const endSwipe = (e: PointerEvent) => {
+    if (!swipe || e.pointerId !== swipe.id) return;
+    const dx = e.clientX - swipe.x;
+    const dy = e.clientY - swipe.y;
+    swipe = null;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.3) step(dx < 0 ? 1 : -1);
   };
-  resetBtn.addEventListener('click', () => {
-    if (resetBtn.classList.contains('armed')) {
-      disarmReset();
-      dialog.close('reset');
+  $('hud').addEventListener('pointerdown', (e) => {
+    if (!(e.target as HTMLElement).closest('button')) startSwipe(e);
+  });
+  $('hud').addEventListener('pointerup', endSwipe);
+  wrap.addEventListener('pointerup', endSwipe);
+
+  // Milestones
+  const goalCard = $('goalCard');
+  let flash = 0;
+  function checkMilestone() {
+    const b = bank();
+    if (slide || b.target <= 0) return;
+    const pct = (shown / b.target) * 100;
+    const m = MILESTONES.filter((x) => x > (b.reached ?? 0) && pct >= x).pop();
+    if (!m) return;
+    b.reached = m;
+    dirty = true;
+    celebrate(m);
+    renderPager();
+  }
+  function celebrate(m: number) {
+    const level = MILESTONES.indexOf(m) + 1;
+    sound.milestone(level);
+    flash = 1;
+    shake(0.3 + level * 0.08, true);
+    fx.burst(JAR.W / 2, JAR.H * 0.5, 16 + level * 8, 1.2 + level * 0.15);
+    const bar = $('barFill').getBoundingClientRect();
+    confetti.burst(bar.right, bar.top, 20 + level * 15, 0.8 + level * 0.1);
+    navigator.vibrate?.(level >= 4 ? [60, 60, 60, 60, 200] : [40, 40, 80]);
+    if (m < 100) {
+      toast(`${m}%  ${MILESTONE_TEXT[m]}`, 2600);
       return;
     }
-    resetBtn.classList.add('armed');
-    resetBtn.textContent = 'Точно? Ещё раз';
-    resetTimer = window.setTimeout(disarmReset, 3000);
-  });
-  const openSettings = () => {
-    $<HTMLInputElement>('fName').value = bank().name;
-    $<HTMLInputElement>('fTarget').value = String(bank().target);
-    disarmReset();
-    dialog.returnValue = '';
-    dialog.showModal();
-  };
-  $('menuBtn').addEventListener('click', openSettings);
-  $('goalBtn').addEventListener('click', openSettings);
-  dialog.addEventListener('close', () => {
-    disarmReset();
+    confetti.rain(vw, 180);
+    confetti.burst(vw * 0.2, vh, 50, 1.2);
+    confetti.burst(vw * 0.8, vh, 50, 1.2);
     const b = bank();
-    if (dialog.returnValue === 'save') {
-      b.name = $<HTMLInputElement>('fName').value.trim() || 'Мечта';
-      const target = Math.round(Number($<HTMLInputElement>('fTarget').value));
-      if (target > 0) b.target = target;
+    $('goalCardText').textContent = `«${b.name}»: ${fmt.format(b.amount)} ₽ собрано. Можно копить дальше или начать новую копилку.`;
+    setTimeout(() => (goalCard.hidden = false), 900);
+  }
+  $('goalMore').addEventListener('click', () => (goalCard.hidden = true));
+  $('goalNew').addEventListener('click', () => {
+    goalCard.hidden = true;
+    sheet.open('create');
+  });
+
+  // Settings sheet
+  async function applyPhoto(id: string, blob: Blob | null | undefined) {
+    const b = state.banks.find((x) => x.id === id);
+    if (!b || blob === undefined) return;
+    if (blob) await putPhoto(id, blob);
+    else await deletePhoto(id);
+    b.photo = !!blob;
+    save(state);
+    if (id === state.current) void loadPhoto();
+  }
+  const sheet = new Sheet({
+    save(v: SheetValues) {
+      const b = bank();
+      b.name = v.name || 'Мечта';
+      if (v.target > 0) b.target = v.target;
+      // a raised target re-opens the milestones above the new percentage
+      b.reached = Math.min(b.reached ?? 0, milestoneFloor(b));
       paintJar();
+      renderPager();
+      void applyPhoto(b.id, v.photo);
       dirty = true;
-    } else if (dialog.returnValue === 'reset') {
+    },
+    create(v: SheetValues) {
+      const nb = freshBank(v.name || 'Новая цель', v.target > 0 ? v.target : 50000);
+      nb.reached = 0;
+      state.banks.push(nb);
+      save(state);
+      renderPager();
+      void applyPhoto(nb.id, v.photo ?? undefined).then(() => switchTo(nb.id, 1));
+      if (!v.photo) switchTo(nb.id, 1);
+    },
+    reset() {
+      const b = bank();
       b.amount = 0;
       b.lucky = 0;
-      [...coins].forEach((c) => removeCoin(c));
-      pending.length = 0;
+      b.reached = 0;
+      clearJar();
       shown = 0;
-      combo = 0;
-      comboLeft = 0;
-      comboEl.classList.remove('show');
+      photoP = -1;
       renderLucky();
+      renderPager();
       persist();
       toast('Копилка обнулена');
-    }
+    },
+    remove() {
+      if (state.banks.length < 2) return;
+      const i = state.banks.findIndex((b) => b.id === state.current);
+      const [gone] = state.banks.splice(i, 1);
+      void deletePhoto(gone.id);
+      const next = state.banks[Math.min(i, state.banks.length - 1)];
+      // the removed bank is already out of the list; don't write its coins anywhere
+      switchTo(next.id, -1, false);
+      toast(`Копилка «${gone.name}» удалена`);
+    },
   });
+  const openSettings = async () => {
+    const b = bank();
+    const blob = b.photo ? await getPhoto(b.id) : undefined;
+    sheet.open('edit', { name: b.name, target: b.target, photo: blob, canDelete: state.banks.length > 1 });
+  };
+  $('menuBtn').addEventListener('click', () => void openSettings());
+  $('goalBtn').addEventListener('click', () => void openSettings());
 
   // Persistence
   let dirty = false;
   let saveWait = 0;
   function persist() {
-    const b = bank();
+    // exact lookup: right after a delete the current id is gone and bank() would fall back to another bank
+    const b = state.banks.find((x) => x.id === state.current);
+    if (!b) return;
     b.coins = coins.map((c) => {
       const p = c.body.translation();
       return [c.type, Math.round(p.x * S * 10) / 10, Math.round(p.y * S * 10) / 10, Math.round(c.body.rotation() * 100) / 100];
@@ -687,6 +899,8 @@ async function boot() {
   }
   renderHud(1);
   renderLucky();
+  renderPager();
+  void loadPhoto();
 
   let resizeTimer = 0;
   let laidOut = `${wrap.clientWidth}x${wrap.clientHeight}`;
@@ -794,8 +1008,14 @@ async function boot() {
     jiggle *= Math.exp(-dt * 5);
     world.rotation = visualTilt + Math.sin(clock * 47) * jiggle * 0.05;
     world.pivot.x = JAR.W / 2 + Math.sin(clock * 61) * jiggle * 7;
+    tickSlide(dt);
+    world.x = baseX + slideX;
+    flash *= Math.exp(-dt * 2.5);
+    confetti.update(dt, vh);
 
     renderHud(dt);
+    checkMilestone();
+    paintPhoto();
     if (motion.active !== motionShown) syncMotionBtn();
 
     saveWait -= dt;

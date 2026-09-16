@@ -251,6 +251,74 @@ dialog[open] { animation: sheetIn 0.28s cubic-bezier(0.2, 0.9, 0.3, 1); }
 .sheet-actions .danger { color: #ff9b85; transition: background 0.2s, color 0.2s; }
 .sheet-actions .danger.armed { background: #d9483b; color: #fff; }
 
+/* Pager */
+.hud { pointer-events: auto; touch-action: pan-y; }
+.pager { display: flex; justify-content: center; align-items: center; gap: 4px; margin-top: 6px; height: 22px; }
+.pager button { display: grid; place-items: center; width: 22px; height: 22px; }
+.pager .dot::before {
+  content: ''; width: 7px; height: 7px; border-radius: 50%;
+  background: rgba(255, 255, 255, 0.25);
+  transition: width 0.25s, background 0.25s;
+}
+.pager .dot.cur::before { width: 20px; border-radius: 4px; background: var(--gold-2); box-shadow: 0 0 10px rgba(243, 197, 82, 0.6); }
+.pager .dot.done::before { background: rgba(243, 197, 82, 0.55); }
+.pager .add { font-weight: 800; font-size: 16px; line-height: 1; color: var(--muted); }
+.pager .add span {
+  display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%;
+  border: 1px dashed rgba(255, 255, 255, 0.35);
+}
+
+/* Photo field */
+.photo-field {
+  display: grid; grid-template-columns: 52px 1fr auto auto; align-items: center; gap: 10px;
+  padding: 10px; border-radius: 14px; background: rgba(255, 255, 255, 0.04); border: 1px solid var(--line);
+}
+.photo-thumb {
+  width: 52px; height: 52px; border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06) center / cover no-repeat;
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+}
+.photo-thumb.has { border-style: solid; }
+.photo-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.photo-text b { font-size: 14px; color: var(--text); }
+.photo-text span { font-size: 11px; color: var(--muted); font-weight: 600; }
+.sheet .photo-pick {
+  display: block; padding: 10px 12px; border-radius: 12px; cursor: pointer;
+  background: rgba(255, 255, 255, 0.08); color: var(--text); font-size: 13px; font-weight: 800;
+}
+.photo-clear { width: 34px; height: 34px; border-radius: 10px; background: rgba(255, 255, 255, 0.06); color: var(--muted); }
+.photo-clear[hidden] { display: none; }
+.sheet-actions[hidden], .sheet-actions button[hidden] { display: none; }
+
+/* Goal reached card */
+.goal-card {
+  position: fixed; inset: 0; display: grid; place-items: center; padding: 24px;
+  background: radial-gradient(circle at 50% 40%, rgba(80, 50, 10, 0.55), rgba(0, 0, 0, 0.7));
+  animation: fadeIn 0.3s ease-out;
+}
+.goal-card[hidden] { display: none; }
+@keyframes fadeIn { from { opacity: 0; } }
+.goal-card-inner {
+  width: min(340px, 100%); padding: 28px 22px 20px; border-radius: 28px; text-align: center;
+  background: linear-gradient(180deg, #33230f, #1b120a);
+  border: 1px solid rgba(243, 197, 82, 0.45);
+  box-shadow: 0 0 60px rgba(243, 180, 60, 0.35), inset 0 1px 0 rgba(255, 240, 200, 0.2);
+  animation: cardIn 0.55s cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+@keyframes cardIn { from { transform: scale(0.6) rotate(-4deg); opacity: 0; } }
+.goal-card-badge {
+  display: inline-grid; place-items: center; width: 86px; height: 86px; border-radius: 50%;
+  font-family: var(--font-num); font-weight: 800; font-size: 22px; color: #6b4608;
+  background: radial-gradient(circle at 32% 26%, #fff 0, transparent 30%), linear-gradient(135deg, var(--gold-1), var(--gold-2) 50%, var(--gold-3));
+  box-shadow: 0 0 30px rgba(243, 197, 82, 0.8);
+  animation: spinIn 1.2s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+@keyframes spinIn { from { transform: rotateY(720deg) scale(0.3); } }
+.goal-card h2 { margin: 16px 0 6px; font-family: var(--font-num); font-size: 24px; }
+.goal-card p { margin: 0 0 18px; color: var(--muted); font-weight: 600; font-size: 14px; line-height: 1.45; }
+.goal-card .sheet-actions button { flex: 1; }
+.goal-card .sheet-actions .primary { margin-left: 0; }
+
 .toast.rare {
   background: linear-gradient(135deg, rgba(255, 158, 196, 0.92), rgba(184, 155, 255, 0.92), rgba(127, 224, 255, 0.92));
   color: #2a1030; font-size: 16px; border-color: rgba(255, 255, 255, 0.5);

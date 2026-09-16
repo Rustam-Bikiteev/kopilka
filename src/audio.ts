@@ -110,6 +110,20 @@ export class Sound {
     this.chime(31, 0.18, 0, 0.5);
   }
 
+  /** Milestone jingle; `level` 1..4 for 25/50/75/100%. */
+  milestone(level: number) {
+    const run = [0, 4, 7, 12, 16, 19, 24, 28].slice(0, 3 + level);
+    run.forEach((s, k) => this.chime(s - 5, 0.3, (k % 2 ? 1 : -1) * 0.25, k * 0.07));
+    const end = run.length * 0.07;
+    if (level >= 4) {
+      [-5, -1, 2, 7].forEach((s) => this.chime(s, 0.2, 0, end + 0.05));
+      [7, 11, 14, 19].forEach((s) => this.chime(s, 0.2, 0, end + 0.45));
+      this.chime(31, 0.16, 0, end + 0.85);
+    } else {
+      this.chime(run[run.length - 1] + 7, 0.18, 0, end + 0.08);
+    }
+  }
+
   private play(buf: AudioBuffer, rate: number, gain: number, pan: number, cutoff: number, delay = 0) {
     const ctx = this.ctx;
     const src = ctx.createBufferSource();

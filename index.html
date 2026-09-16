@@ -40,6 +40,7 @@
         <span id="lucky" class="lucky" hidden></span>
       </div>
       <div class="bar"><i id="barFill"></i></div>
+      <nav id="pager" class="pager" aria-label="Копилки"></nav>
     </header>
 
     <footer id="controls" class="controls">
@@ -68,15 +69,41 @@
     <div id="floaters"></div>
     <div id="toast" class="toast"></div>
 
+    <div id="goalCard" class="goal-card" hidden>
+      <div class="goal-card-inner">
+        <div class="goal-card-badge">100%</div>
+        <h2>Цель достигнута!</h2>
+        <p id="goalCardText"></p>
+        <div class="sheet-actions">
+          <button id="goalMore" type="button" class="ghost">Копить дальше</button>
+          <button id="goalNew" type="button" class="primary">Новая копилка</button>
+        </div>
+      </div>
+    </div>
+
     <dialog id="settings">
       <form method="dialog" class="sheet">
-        <h2>Копилка</h2>
+        <h2 id="sheetTitle">Копилка</h2>
         <label>На что копим<input id="fName" maxlength="24" autocomplete="off" /></label>
         <label>Цель, ₽<input id="fTarget" type="number" inputmode="numeric" min="1" step="1" /></label>
-        <div class="sheet-actions">
+        <div class="photo-field">
+          <div id="photoThumb" class="photo-thumb"></div>
+          <div class="photo-text">
+            <b>Фото цели</b>
+            <span>Проявляется по мере накопления</span>
+          </div>
+          <label class="ghost photo-pick">Выбрать<input id="fPhoto" type="file" accept="image/*" hidden /></label>
+          <button id="photoClear" type="button" class="ghost photo-clear" aria-label="Убрать фото">✕</button>
+        </div>
+        <div class="sheet-actions" id="editActions">
           <button id="resetBtn" type="button" class="ghost danger">Обнулить</button>
+          <button id="deleteBtn" type="button" class="ghost danger">Удалить</button>
           <button value="cancel" class="ghost">Отмена</button>
           <button value="save" class="primary">Сохранить</button>
+        </div>
+        <div class="sheet-actions" id="createActions">
+          <button value="cancel" class="ghost">Отмена</button>
+          <button value="create" class="primary">Создать</button>
         </div>
       </form>
     </dialog>
