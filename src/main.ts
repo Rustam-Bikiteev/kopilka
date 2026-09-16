@@ -4,25 +4,48 @@ import type { RigidBody } from '@dimforge/rapier2d-compat';
 import { Application, Container, Sprite, Texture } from 'pixi.js';
 import { registerSW } from 'virtual:pwa-register';
 import { JAR, NR, outline } from './jar';
-import { COIN_PAD, COIN_TYPES, drawCoinFace, drawCoinShadow, drawCoinShine } from './coins';
+import {
+  COIN_PAD,
+  COIN_TYPES,
+  LUCKY,
+  MAX_DEPOSIT_TYPE,
+  MERGES,
+  area,
+  drawCoinFace,
+  drawCoinShadow,
+  drawCoinShine,
+  extent,
+} from './coins';
 import { JAR_PAD, JAR_TEX_H, JAR_TEX_W, drawBackground, drawGlow, drawJarBack, drawJarFront } from './paint';
 import { Sound } from './audio';
 import { Motion } from './motion';
-import { freshBank, load, save } from './store';
+import { Fx, MERGE_DELAY } from './fx';
+import { load, save } from './store';
 
 const S = 50; // virtual px per physics unit
 const G = 75; // base gravity, units/s^2 (stylised: faster than real for a snappier fall)
 const K = G / 9.81;
 const DT = 1 / 120;
 const MAX_COINS = 240;
+// Share of the jar's inner area covered by coins: merge above MERGE_FILL, evict above MAX_FILL.
+const MERGE_FILL = 0.4;
+const MAX_FILL = 0.62;
 const HIT_MIN = 1.2;
+const COMBO_WINDOW = 1.4;
+const PENTATONIC = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24, 26, 28, 31];
+const LUCKY_CHANCE_ADD = 0.04;
+const LUCKY_CHANCE_POUR = 0.004;
+const MAX_LUCKY = 12;
 
 interface Coin {
   body: RigidBody;
   type: number;
   view: Container;
   sprites: [Sprite, Sprite, Sprite];
+  halo?: Sprite;
+  /** sim time the appear animation starts; -1 when done */
   born: number;
+  pop: boolean;
   lastSound: number;
   pvx: number;
   pvy: number;
@@ -59,7 +82,9 @@ async function boot() {
   // Scene
   const bg = new Sprite();
   const world = new Container();
-  const glow = new Sprite(Texture.from(drawGlow()));
+  const glowTex = Texture.from(drawGlow());
+  const glow = new Sprite(glowTex);
+  const fx = new Fx();
   const jarBack = new Sprite();
   const coinLayer = new Container();
   const jarFront = new Sprite();
@@ -71,7 +96,7 @@ async function boot() {
   for (const s of [jarBack, jarFront]) {
     s.position.set(-JAR_PAD, -JAR_PAD);
   }
-  world.addChild(glow, jarBack, coinLayer, jarFront);
+  world.addChild(glow, jarBack, coinLayer, jarFront, fx.layer);
   app.stage.addChild(bg, world);
   const pivotY = JAR.H * 0.6;
   world.pivot.set(JAR.W / 2, pivotY);
@@ -83,6 +108,9 @@ async function boot() {
   const jarBody = physics.createRigidBody(RAPIER.RigidBodyDesc.fixed());
   const inner = outline(JAR.GLASS);
   inner.push(inner[0]);
+  let jarArea = 0;
+  for (let k = 1; k < inner.length; k++) jarArea += (inner[k - 1][0] * inner[k][1] - inner[k][0] * inner[k - 1][1]) / 2;
+  jarArea = Math.abs(jarArea);
   physics.createCollider(
     RAPIER.ColliderDesc.polyline(new Float32Array(inner.flatMap(([x, y]) => [x / S, y / S])))
       .setRestitution(0.35)
@@ -135,7 +163,8 @@ async function boot() {
       c.sprites[1].texture = faceTex[c.type];
       c.sprites[2].texture = shineTex[c.type];
     }
-    old.forEach((t) => t.destroy(true));
+    // merge ghosts may still be flying with the old textures
+    setTimeout(() => old.forEach((t) => t.destroy(true)), 1000);
   }
 
   function layout() {
@@ -166,7 +195,7 @@ async function boot() {
   const byCollider = new Map<number, Coin>();
   let simTime = 0;
 
-  function addCoin(type: number, x: number, y: number, vx: number, vy: number, angle: number, spin: number, animate: boolean) {
+  function addCoin(type: number, x: number, y: number, vx: number, vy: number, angle: number, spin: number, born = -1, pop = false) {
     const t = COIN_TYPES[type];
     const body = physics.createRigidBody(
       RAPIER.RigidBodyDesc.dynamic()
@@ -178,63 +207,79 @@ async function boot() {
         .setLinearDamping(0.05)
         .setAngularDamping(0.5),
     );
-    const col = physics.createCollider(
-      RAPIER.ColliderDesc.ball(t.r / S)
-        .setRestitution(0.42)
-        .setFriction(0.3)
-        .setDensity(t.metal === 'gold' ? 1.25 : 1)
-        .setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
-      body,
-    );
-    const size = (t.r + COIN_PAD) * 2;
+    const shape = t.bar
+      ? RAPIER.ColliderDesc.cuboid(t.bar.w / 2 / S, t.bar.h / 2 / S).setRestitution(0.2).setFriction(0.5).setDensity(1.6)
+      : RAPIER.ColliderDesc.ball(t.r / S)
+          .setRestitution(0.42)
+          .setFriction(0.3)
+          .setDensity(t.metal === 'silver' ? 1 : 1.25);
+    const col = physics.createCollider(shape.setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS), body);
+    const size = (extent(t) + COIN_PAD) * 2;
     const sprites = [new Sprite(shadowTex[type]), new Sprite(faceTex[type]), new Sprite(shineTex[type])] as [Sprite, Sprite, Sprite];
     const view = new Container();
+    let halo: Sprite | undefined;
+    if (type === LUCKY) {
+      halo = new Sprite(glowTex);
+      halo.anchor.set(0.5);
+      halo.blendMode = 'add';
+      halo.tint = 0xffb8e6;
+      halo.width = halo.height = t.r * 5;
+      view.addChild(halo);
+    }
     for (const s of sprites) {
       s.anchor.set(0.5);
       s.width = s.height = size;
       view.addChild(s);
     }
     view.position.set(x, y);
+    if (born >= 0) view.alpha = 0;
     coinLayer.addChild(view);
-    const coin: Coin = { body, type, view, sprites, born: animate ? simTime : -1, lastSound: -1, pvx: vx, pvy: vy };
+    const coin: Coin = { body, type, view, sprites, halo, born, pop, lastSound: -1, pvx: vx, pvy: vy };
     coins.push(coin);
     byCollider.set(col.handle, coin);
     return coin;
   }
 
-  function removeCoin(coin: Coin) {
+  /** Removes the body; with `ghostTo` the sprite flies there instead of vanishing. */
+  function removeCoin(coin: Coin, ghostTo?: { x: number; y: number }) {
     const i = coins.indexOf(coin);
     if (i >= 0) coins.splice(i, 1);
     for (let k = 0; k < coin.body.numColliders(); k++) byCollider.delete(coin.body.collider(k).handle);
     physics.removeRigidBody(coin.body);
-    coin.view.destroy({ children: true });
+    if (ghostTo) fx.ghost(coin.view, ghostTo.x, ghostTo.y);
+    else coin.view.destroy({ children: true });
   }
 
+  const fill = () => coins.reduce((s, c) => s + area(COIN_TYPES[c.type]), 0) / jarArea;
+
   function dropCoin(type: number) {
-    if (coins.length >= MAX_COINS) {
-      let victim = coins[0];
-      for (const c of coins) if (c.type < victim.type) victim = c;
-      removeCoin(victim);
+    if (coins.length >= MAX_COINS || fill() > MAX_FILL) {
+      let victim: Coin | undefined;
+      for (const c of coins) if (c.type !== LUCKY && (!victim || c.type < victim.type)) victim = c;
+      removeCoin(victim ?? coins[0]);
     }
-    const r = COIN_TYPES[type].r;
-    const span = NR - JAR.NL - 2 * JAR.GLASS - 2 * r - 12;
+    const t = COIN_TYPES[type];
+    const e = extent(t);
+    const span = NR - JAR.NL - 2 * JAR.GLASS - 2 * e - 12;
+    const bar = !!t.bar;
     addCoin(
       type,
       JAR.W / 2 + (Math.random() - 0.5) * span,
-      JAR.LID + r + 2,
+      JAR.LID + (bar ? t.bar!.h / 2 : t.r) + 2,
       (Math.random() - 0.5) * 3,
       3 + Math.random() * 3,
-      Math.random() * Math.PI * 2,
-      (Math.random() - 0.5) * 24,
-      true,
+      bar ? (Math.random() - 0.5) * 0.3 : Math.random() * Math.PI * 2,
+      (Math.random() - 0.5) * (bar ? 2 : 24),
+      simTime,
     );
+    if (type === LUCKY) celebrateLucky();
     dirty = true;
   }
 
   function decompose(amount: number) {
     const out: number[] = [];
     let rest = amount;
-    for (let i = COIN_TYPES.length - 1; i >= 0 && out.length < 14; i--) {
+    for (let i = MAX_DEPOSIT_TYPE; i >= 0 && out.length < 14; i--) {
       while (rest >= COIN_TYPES[i].value && out.length < 14) {
         out.push(i);
         rest -= COIN_TYPES[i].value;
@@ -251,8 +296,111 @@ async function boot() {
     sound.unlock();
     bank().amount += amount;
     pending.push(...decompose(amount));
+    maybeLucky(LUCKY_CHANCE_ADD);
     floater(`+${fmt.format(amount)} ₽`);
+    bumpCombo();
     dirty = true;
+  }
+
+  // Combo: quick consecutive deposits climb a pentatonic scale
+  const comboEl = $('combo');
+  let combo = 0;
+  let comboLeft = 0;
+  function bumpCombo() {
+    combo++;
+    comboLeft = COMBO_WINDOW;
+    const step = PENTATONIC[Math.min(combo - 1, PENTATONIC.length - 1)];
+    sound.chime(step, 0.22 + Math.min(combo, 10) * 0.012);
+    if (combo < 2) return;
+    comboEl.textContent = `×${combo}`;
+    comboEl.classList.add('show');
+    comboEl.classList.remove('hit');
+    void comboEl.offsetWidth;
+    comboEl.classList.add('hit');
+    if (combo % 5 === 0) {
+      fx.burst(JAR.W / 2, JAR.LID + 20, 10 + combo, 1.1);
+      navigator.vibrate?.(20);
+    }
+  }
+  function tickCombo(dt: number) {
+    if (comboLeft <= 0) return;
+    comboLeft -= dt;
+    if (comboLeft <= 0) {
+      combo = 0;
+      comboEl.classList.remove('show');
+    }
+  }
+
+  // Rare coin: a collectible that carries no money
+  const luckyEl = $('lucky');
+  function maybeLucky(chance: number) {
+    const inJar = coins.filter((c) => c.type === LUCKY).length + pending.filter((t) => t === LUCKY).length;
+    if (inJar >= MAX_LUCKY || Math.random() >= chance) return;
+    pending.push(LUCKY);
+  }
+  function celebrateLucky() {
+    const b = bank();
+    b.lucky = (b.lucky ?? 0) + 1;
+    renderLucky(true);
+    sound.fanfare();
+    fx.burst(JAR.W / 2, JAR.LID + 24, 28, 1.6, 0xffc8f0);
+    toast('Редкая монета! Такие попадаются нечасто', 2400, true);
+    navigator.vibrate?.([30, 50, 30, 50, 60]);
+  }
+  function renderLucky(hit = false) {
+    const n = bank().lucky ?? 0;
+    luckyEl.hidden = n === 0;
+    luckyEl.textContent = `★ ${n}`;
+    if (hit) {
+      luckyEl.classList.remove('hit');
+      void luckyEl.offsetWidth;
+      luckyEl.classList.add('hit');
+    }
+  }
+
+  // Merging: when the jar gets crowded, groups of resting small coins fuse into a bigger one
+  let mergeWait = 0;
+  function tryMerge() {
+    const over = fill() - MERGE_FILL;
+    if (over <= 0) return over;
+    const still = coins.filter((c) => c.born < 0 && c.type in MERGES && Math.hypot(c.pvx, c.pvy) < 4);
+    for (const type of Object.keys(MERGES).map(Number)) {
+      const { n: need, to } = MERGES[type];
+      const pool = still.filter((c) => c.type === type);
+      if (pool.length < need) continue;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const seed = pool[(Math.random() * pool.length) | 0];
+        const sp = seed.body.translation();
+        const near = pool
+          .map((c) => {
+            const p = c.body.translation();
+            return { c, d: Math.hypot(p.x - sp.x, p.y - sp.y) * S };
+          })
+          .filter((o) => o.d < 130)
+          .sort((a, b) => a.d - b.d)
+          .slice(0, need);
+        if (near.length < need) continue;
+        let cx = 0;
+        let cy = 0;
+        for (const { c } of near) {
+          const p = c.body.translation();
+          cx += (p.x * S) / need;
+          cy += (p.y * S) / need;
+        }
+        for (const { c } of near) removeCoin(c, { x: cx, y: cy });
+        const bar = !!COIN_TYPES[to].bar;
+        addCoin(to, cx, cy, 0, -3, bar ? 0 : Math.random() * Math.PI * 2, (Math.random() - 0.5) * (bar ? 1 : 6), simTime + MERGE_DELAY, true);
+        setTimeout(() => {
+          sound.chime(14 - type * 2, 0.26, pan(cx));
+          sound.impact('coin', 0.7, pan(cx));
+          fx.burst(cx, cy, 8 + type * 2, 0.7 + type * 0.12);
+          navigator.vibrate?.(12);
+        }, MERGE_DELAY * 1000);
+        dirty = true;
+        return over;
+      }
+    }
+    return over;
   }
 
   // Sound from contacts
@@ -317,9 +465,10 @@ async function boot() {
   }
 
   let toastTimer = 0;
-  function toast(text: string, ms = 2200) {
+  function toast(text: string, ms = 2200, rare = false) {
     const el = $('toast');
     el.textContent = text;
+    el.classList.toggle('rare', rare);
     el.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = window.setTimeout(() => el.classList.remove('show'), ms);
@@ -353,7 +502,7 @@ async function boot() {
 
   // Pour button
   const pourBtn = $('pourBtn');
-  let pour: { t: number; next: number; total: number } | null = null;
+  let pour: { t: number; next: number; total: number; count: number } | null = null;
   pourBtn.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     sound.unlock();
@@ -363,7 +512,7 @@ async function boot() {
       /* synthetic pointer */
     }
     pourBtn.classList.add('active');
-    pour = { t: 0, next: 0, total: 0 };
+    pour = { t: 0, next: 0, total: 0, count: 0 };
   });
   const stopPour = () => {
     if (!pour) return;
@@ -387,6 +536,9 @@ async function boot() {
       bank().amount += v;
       pour.total += v;
       dropCoin(type);
+      pour.count++;
+      if (pour.count % 6 === 1) bumpCombo();
+      maybeLucky(LUCKY_CHANCE_POUR);
       pour.next += Math.max(0.035, 0.13 - t * 0.02);
     }
     $('pourCount').textContent = `+${fmt.format(pour.total)} ₽`;
@@ -457,15 +609,37 @@ async function boot() {
   });
 
   // Settings
+  // Settings. Reset is confirmed by a second tap inside the sheet: native confirm() is
+  // suppressed in some webviews and standalone PWAs, where it silently returns false.
   const dialog = $<HTMLDialogElement>('settings');
+  const resetBtn = $<HTMLButtonElement>('resetBtn');
+  let resetTimer = 0;
+  const disarmReset = () => {
+    clearTimeout(resetTimer);
+    resetBtn.classList.remove('armed');
+    resetBtn.textContent = 'Обнулить';
+  };
+  resetBtn.addEventListener('click', () => {
+    if (resetBtn.classList.contains('armed')) {
+      disarmReset();
+      dialog.close('reset');
+      return;
+    }
+    resetBtn.classList.add('armed');
+    resetBtn.textContent = 'Точно? Ещё раз';
+    resetTimer = window.setTimeout(disarmReset, 3000);
+  });
   const openSettings = () => {
     $<HTMLInputElement>('fName').value = bank().name;
     $<HTMLInputElement>('fTarget').value = String(bank().target);
+    disarmReset();
+    dialog.returnValue = '';
     dialog.showModal();
   };
   $('menuBtn').addEventListener('click', openSettings);
   $('goalBtn').addEventListener('click', openSettings);
   dialog.addEventListener('close', () => {
+    disarmReset();
     const b = bank();
     if (dialog.returnValue === 'save') {
       b.name = $<HTMLInputElement>('fName').value.trim() || 'Мечта';
@@ -474,14 +648,17 @@ async function boot() {
       paintJar();
       dirty = true;
     } else if (dialog.returnValue === 'reset') {
-      if (!confirm('Обнулить копилку? Сумма и монеты пропадут.')) return;
-      const f = freshBank();
       b.amount = 0;
-      b.coins = f.coins;
-      [...coins].forEach(removeCoin);
+      b.lucky = 0;
+      [...coins].forEach((c) => removeCoin(c));
       pending.length = 0;
       shown = 0;
-      dirty = true;
+      combo = 0;
+      comboLeft = 0;
+      comboEl.classList.remove('show');
+      renderLucky();
+      persist();
+      toast('Копилка обнулена');
     }
   });
 
@@ -506,12 +683,17 @@ async function boot() {
   layout();
   sound.muteUntil = performance.now() + 900;
   for (const [type, x, y, a] of bank().coins) {
-    if (COIN_TYPES[type]) addCoin(type, x, y, 0, 0, a, 0, false);
+    if (COIN_TYPES[type]) addCoin(type, x, y, 0, 0, a, 0);
   }
   renderHud(1);
+  renderLucky();
 
   let resizeTimer = 0;
+  let laidOut = `${wrap.clientWidth}x${wrap.clientHeight}`;
   new ResizeObserver(() => {
+    const size = `${wrap.clientWidth}x${wrap.clientHeight}`;
+    if (size === laidOut) return;
+    laidOut = size;
     clearTimeout(resizeTimer);
     resizeTimer = window.setTimeout(() => {
       app.resize();
@@ -575,19 +757,36 @@ async function boot() {
         c.body.setLinvel({ x: 0, y: 0 }, true);
       }
       c.view.position.set(x, y);
-      c.sprites[1].rotation = c.body.rotation();
+      const rot = c.body.rotation();
+      c.sprites[1].rotation = rot;
+      if (COIN_TYPES[c.type].bar) c.sprites[0].rotation = rot;
+      if (c.halo) {
+        c.halo.alpha = 0.55 + Math.sin(clock * 4 + x) * 0.25;
+        c.halo.rotation = clock * 0.6;
+      }
       if (c.born >= 0) {
         const age = simTime - c.born;
-        if (age < 0.18) {
-          const k = age / 0.18;
-          c.view.alpha = k;
-          c.view.scale.set(1 + 0.45 * (1 - k) * (1 - k));
+        const dur = c.pop ? 0.3 : 0.18;
+        if (age < 0) {
+          c.view.alpha = 0;
+        } else if (age < dur) {
+          const k = age / dur;
+          c.view.alpha = Math.min(1, k * 2);
+          // merge result overshoots from small; a dropped coin shrinks in from above
+          c.view.scale.set(c.pop ? 0.4 + 0.6 * k + Math.sin(k * Math.PI) * 0.35 : 1 + 0.45 * (1 - k) * (1 - k));
         } else {
           c.view.alpha = 1;
           c.view.scale.set(1);
           c.born = -1;
         }
       }
+    }
+    fx.update(dt);
+    tickCombo(dt);
+    mergeWait -= dt;
+    if (mergeWait <= 0) {
+      const over = tryMerge();
+      mergeWait = over > 0.08 ? 0.04 : over > 0.03 ? 0.1 : 0.25;
     }
 
     // desktop tilt is shown by rotating the jar; on a phone the phone itself rotates

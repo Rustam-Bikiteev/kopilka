@@ -17,6 +17,7 @@ export class Sound {
   private master: GainNode;
   private send: GainNode;
   private buffers: Record<ImpactKind, AudioBuffer[]>;
+  private bell: AudioBuffer;
   private voices = 0;
   private unlocked = false;
   muteUntil = 0;
@@ -56,6 +57,19 @@ export class Sound {
       glass: Array.from({ length: 8 }, () => this.glassBuffer()),
       thud: Array.from({ length: 6 }, () => this.thudBuffer()),
     };
+    this.bell = this.buffer(
+      1.6,
+      [
+        { f: 1046.5, a: 1, tau: 0.9 },
+        { f: 1046.5 * 1.003, a: 0.4, tau: 0.8 },
+        { f: 2093, a: 0.45, tau: 0.55 },
+        { f: 3150, a: 0.3, tau: 0.32 },
+        { f: 4290, a: 0.16, tau: 0.2 },
+        { f: 5680, a: 0.1, tau: 0.12 },
+      ],
+      0.15,
+      0.001,
+    );
   }
 
   unlock() {
@@ -69,25 +83,46 @@ export class Sound {
   }
 
   /** strength 0..1, pan -1..1 */
-  impact(kind: ImpactKind, strength: number, pan: number, rate = 1) {
-    const ctx = this.ctx;
-    if (ctx.state !== 'running' || performance.now() < this.muteUntil) return;
+  impact(kind: ImpactKind, strength: number, pan: number) {
+    if (this.ctx.state !== 'running' || performance.now() < this.muteUntil) return;
     if (this.voices >= MAX_VOICES && strength < 0.7) return;
     if (this.voices >= MAX_VOICES + 6) return;
-
     const list = this.buffers[kind];
+    const level = kind === 'coin' ? 0.5 : kind === 'glass' ? 0.62 : 0.8;
+    this.play(
+      list[(Math.random() * list.length) | 0],
+      0.93 + Math.random() * 0.14,
+      (0.04 + Math.pow(strength, 1.35) * 0.96) * level,
+      pan,
+      1500 + strength * strength * 17000,
+    );
+  }
+
+  /** Bell note `semis` semitones above C6. */
+  chime(semis: number, gain = 0.3, pan = 0, delay = 0) {
+    if (this.ctx.state !== 'running') return;
+    this.play(this.bell, Math.pow(2, semis / 12), gain, pan, 20000, delay);
+  }
+
+  /** Rising sparkle for the rare coin. */
+  fanfare() {
+    [0, 4, 7, 12, 16, 19, 24].forEach((s, k) => this.chime(s + 2, 0.34 - k * 0.025, (k % 2 ? 1 : -1) * 0.3, k * 0.065));
+    this.chime(31, 0.18, 0, 0.5);
+  }
+
+  private play(buf: AudioBuffer, rate: number, gain: number, pan: number, cutoff: number, delay = 0) {
+    const ctx = this.ctx;
     const src = ctx.createBufferSource();
-    src.buffer = list[(Math.random() * list.length) | 0];
-    src.playbackRate.value = rate * (0.93 + Math.random() * 0.14);
+    src.buffer = buf;
+    src.playbackRate.value = rate;
 
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
-    lp.frequency.value = 1500 + strength * strength * 17000;
+    lp.frequency.value = Math.min(cutoff, ctx.sampleRate * 0.45);
     lp.Q.value = 0.4;
 
     const g = ctx.createGain();
-    const level = kind === 'coin' ? 0.5 : kind === 'glass' ? 0.62 : 0.8;
-    g.gain.value = (0.04 + Math.pow(strength, 1.35) * 0.96) * level;
+    g.gain.value = gain;
 
     src.connect(lp);
     lp.connect(g);
@@ -107,7 +142,7 @@ export class Sound {
       src.disconnect();
       out.disconnect();
     };
-    src.start();
+    src.start(ctx.currentTime + delay);
   }
 
   private buffer(dur: number, modes: Mode[], click: number, clickTau: number) {

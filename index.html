@@ -31,8 +31,14 @@
           </button>
         </div>
       </div>
-      <div class="amount"><span id="amount">0</span><span class="cur">₽</span></div>
-      <div class="target">из <span id="target">10 000</span> ₽ <span class="dot"></span> <span id="pct">0%</span></div>
+      <div class="amount-row">
+        <div class="amount"><span id="amount">0</span><span class="cur">₽</span></div>
+        <span id="combo" class="combo"></span>
+      </div>
+      <div class="target">
+        из <span id="target">10 000</span> ₽ <span class="dot"></span> <span id="pct">0%</span>
+        <span id="lucky" class="lucky" hidden></span>
+      </div>
       <div class="bar"><i id="barFill"></i></div>
     </header>
 
@@ -68,7 +74,7 @@
         <label>На что копим<input id="fName" maxlength="24" autocomplete="off" /></label>
         <label>Цель, ₽<input id="fTarget" type="number" inputmode="numeric" min="1" step="1" /></label>
         <div class="sheet-actions">
-          <button value="reset" class="ghost danger">Обнулить</button>
+          <button id="resetBtn" type="button" class="ghost danger">Обнулить</button>
           <button value="cancel" class="ghost">Отмена</button>
           <button value="save" class="primary">Сохранить</button>
         </div>

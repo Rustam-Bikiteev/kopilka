@@ -7,6 +7,8 @@ export interface Bank {
   target: number;
   amount: number;
   coins: SavedCoin[];
+  /** rare coins found so far */
+  lucky?: number;
 }
 
 export interface State {

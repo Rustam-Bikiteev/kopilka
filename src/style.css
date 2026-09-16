@@ -90,6 +90,29 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .amount.bump { animation: bump 0.22s ease-out; }
 @keyframes bump { 40% { transform: scale(1.05); } }
 
+.amount-row { position: relative; display: inline-block; }
+.combo {
+  position: absolute; left: 100%; top: 6px; margin-left: 2px;
+  padding: 3px 8px; border-radius: 999px;
+  font-family: var(--font-num); font-weight: 800; font-size: 13px; color: #3a2606;
+  background: linear-gradient(135deg, var(--gold-1), var(--gold-2));
+  box-shadow: 0 0 16px rgba(243, 197, 82, 0.7);
+  transform: rotate(-10deg) scale(0); opacity: 0;
+  transition: transform 0.25s cubic-bezier(0.3, 1.8, 0.5, 1), opacity 0.2s;
+  white-space: nowrap;
+}
+.combo.show { opacity: 1; transform: rotate(-10deg) scale(1); }
+.combo.hit { animation: comboHit 0.22s ease-out; }
+@keyframes comboHit { 40% { transform: rotate(-4deg) scale(1.35); } }
+
+.lucky {
+  margin-left: 8px; padding: 2px 8px; border-radius: 999px;
+  color: #fff; font-weight: 800;
+  background: linear-gradient(90deg, #ff9ec4, #b89bff, #7fe0ff);
+}
+.lucky[hidden] { display: none; }
+.lucky.hit { animation: comboHit 0.3s ease-out; }
+
 .target { margin-top: 2px; font-size: 13px; color: var(--muted); font-weight: 600; }
 .target .dot { display: inline-block; width: 3px; height: 3px; border-radius: 50%; background: currentColor; vertical-align: middle; margin: 0 6px; }
 #pct { color: var(--gold-2); font-weight: 800; }
@@ -225,4 +248,11 @@ dialog[open] { animation: sheetIn 0.28s cubic-bezier(0.2, 0.9, 0.3, 1); }
 .sheet-actions button { padding: 12px 14px; border-radius: 12px; font-weight: 800; font-size: 14px; }
 .sheet-actions .primary { margin-left: auto; background: linear-gradient(135deg, var(--gold-1), var(--gold-2)); color: #3a2606; }
 .sheet-actions .ghost { background: rgba(255, 255, 255, 0.06); }
-.sheet-actions .danger { color: #ff9b85; }
+.sheet-actions .danger { color: #ff9b85; transition: background 0.2s, color 0.2s; }
+.sheet-actions .danger.armed { background: #d9483b; color: #fff; }
+
+.toast.rare {
+  background: linear-gradient(135deg, rgba(255, 158, 196, 0.92), rgba(184, 155, 255, 0.92), rgba(127, 224, 255, 0.92));
+  color: #2a1030; font-size: 16px; border-color: rgba(255, 255, 255, 0.5);
+  box-shadow: 0 0 40px rgba(255, 180, 230, 0.6);
+}
