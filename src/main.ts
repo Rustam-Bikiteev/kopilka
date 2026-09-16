@@ -41,6 +41,13 @@ const LUCKY_CHANCE_POUR = 0.004;
 const MAX_LUCKY = 12;
 const SLIDE_OUT = 0.18;
 const SLIDE_IN = 0.42;
+// Withdrawal: jar held upside down for FLIP_HOLD seconds opens the slot
+const FLIP_G = -0.45;
+const FLIP_HOLD = 0.5;
+const FLIP_END = 0.35;
+const EXIT_EVERY = 0.055;
+const SLOT_HALF = 37;
+const UNDO_MS = 6000;
 const MILESTONE_TEXT: Record<number, string> = {
   25: 'Четверть пути!',
   50: 'Половина! Так держать',
@@ -521,6 +528,97 @@ async function boot() {
   }
   motion.onShake = (p) => shake(0.25 + p * 0.35, false);
 
+  // Withdrawal by turning the jar over: coins leave through the slot and are subtracted
+  const withdrawEl = $('withdraw');
+  const undoEl = $('undo');
+  let flip: { up: number; down: number; open: boolean; total: number; reached: number; wait: number } | null = null;
+  let undoTimer = 0;
+  let undoData: { id: string; total: number; reached: number } | null = null;
+
+  function tickWithdraw(dt: number) {
+    const upside = physics.gravity.y < FLIP_G * G;
+    if (!flip) {
+      if (!upside || slide || sheet.isOpen) return;
+      const b = bank();
+      flip = { up: 0, down: 0, open: false, total: 0, reached: b.reached ?? 0, wait: 0 };
+    }
+    if (upside) {
+      flip.up += dt;
+      flip.down = 0;
+    } else {
+      flip.down += dt;
+      if (flip.down >= FLIP_END || !flip.open) return endWithdraw();
+    }
+    if (!flip.open && flip.up >= FLIP_HOLD) {
+      flip.open = true;
+      stopPour();
+      sound.chime(12, 0.2);
+      navigator.vibrate?.(30);
+    }
+    if (!flip.open || !upside) return;
+
+    // gently herd resting coins towards the slot
+    for (const c of coins) {
+      const p = c.body.translation();
+      if (p.y * S < JAR.NECK_B) c.body.applyImpulse({ x: (JAR.W / 2 / S - p.x) * 0.02 * c.body.mass(), y: 0 }, true);
+    }
+    flip.wait -= dt;
+    if (flip.wait > 0) return;
+    const b = bank();
+    if (b.amount <= 0) return;
+    const out = coins.find((c) => {
+      if (c.type === LUCKY || c.born >= 0) return false;
+      const t = COIN_TYPES[c.type];
+      const p = c.body.translation();
+      return p.y * S < JAR.LID + extent(t) + 14 && Math.abs(p.x * S - JAR.W / 2) < SLOT_HALF + extent(t);
+    });
+    if (!out) {
+      // coins evicted from a full jar still count: bring them back to fall out
+      if (!pending.length && !coins.some((c) => c.type !== LUCKY)) pending.push(...decompose(b.amount));
+      return;
+    }
+    const p = out.body.translation();
+    const v = Math.min(COIN_TYPES[out.type].value, b.amount);
+    removeCoin(out, { x: p.x * S, y: -80 });
+    b.amount -= v;
+    flip.total += v;
+    flip.wait = EXIT_EVERY;
+    b.reached = Math.min(b.reached ?? 0, milestoneFloor(b));
+    sound.impact('coin', 0.5 + Math.random() * 0.3, pan(p.x * S));
+    buzz(0.5);
+    withdrawEl.textContent = `−${fmt.format(flip.total)} ₽`;
+    withdrawEl.classList.add('show');
+    dirty = true;
+  }
+
+  function endWithdraw() {
+    if (!flip) return;
+    const { total, reached } = flip;
+    flip = null;
+    withdrawEl.classList.remove('show');
+    if (total <= 0) return;
+    renderPager();
+    undoData = { id: state.current, total, reached };
+    $('undoText').textContent = `Снято ${fmt.format(total)} ₽`;
+    undoEl.hidden = false;
+    clearTimeout(undoTimer);
+    undoTimer = window.setTimeout(() => (undoEl.hidden = true), UNDO_MS);
+  }
+
+  $('undoBtn').addEventListener('click', () => {
+    undoEl.hidden = true;
+    const u = undoData;
+    undoData = null;
+    const b = state.banks.find((x) => x.id === u?.id);
+    if (!u || !b) return;
+    b.amount += u.total;
+    b.reached = u.reached;
+    if (b.id === state.current) pending.push(...decompose(u.total));
+    renderPager();
+    dirty = true;
+    toast('Вернули в копилку');
+  });
+
   // Floating labels
   function floater(text: string, xPx = JAR.W / 2, yPx = JAR.LID) {
     const p = world.toGlobal({ x: xPx, y: yPx });
@@ -675,11 +773,12 @@ async function boot() {
     else if (e.code === 'ArrowRight') keyTilt = 1.1;
     else if (e.code === 'Space' && !e.repeat) shake(1, true);
     else if (e.code === 'ArrowUp') add(10);
+    else if (e.code === 'KeyF') keyTilt = Math.PI;
     else if (e.code === 'BracketLeft' || e.code === 'PageUp') step(-1);
     else if (e.code === 'BracketRight' || e.code === 'PageDown') step(1);
   });
   window.addEventListener('keyup', (e) => {
-    if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') keyTilt = 0;
+    if (e.code === 'ArrowLeft' || e.code === 'ArrowRight' || e.code === 'KeyF') keyTilt = 0;
   });
 
   // Several banks: one physics world, coins are swapped in and out on switch
@@ -693,6 +792,7 @@ async function boot() {
 
   function loadBank(id: string, keepOld: boolean) {
     if (keepOld) persist();
+    endWithdraw();
     stopPour();
     clearJar();
     state.current = id;
@@ -958,6 +1058,7 @@ async function boot() {
     }
 
     tickPour(dt);
+    tickWithdraw(dt);
     spawnWait -= dt;
     if (pending.length && spawnWait <= 0) {
       dropCoin(pending.shift()!);

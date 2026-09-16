@@ -373,3 +373,22 @@ dialog[open] { animation: sheetIn 0.28s cubic-bezier(0.2, 0.9, 0.3, 1); }
 [data-theme='neon'] .amount { filter: drop-shadow(0 0 10px rgba(0, 240, 255, 0.6)) drop-shadow(0 0 22px rgba(255, 79, 208, 0.5)); }
 [data-theme='clay'] .floater { text-shadow: 0 2px 0 rgba(255, 255, 255, 0.8); color: var(--gold-3); }
 [data-theme='clay'] .toast.rare { color: #2a1030; }
+
+/* Withdrawal */
+.withdraw {
+  position: fixed; left: 50%; top: 38%; transform: translate(-50%, -50%) scale(0.8);
+  font-family: var(--font-num); font-weight: 800; font-size: calc(44px * var(--num-scale));
+  color: #ff8a7a; text-shadow: 0 0 20px rgba(255, 90, 70, 0.6), 0 2px 0 rgba(0, 0, 0, 0.4);
+  opacity: 0; pointer-events: none; transition: opacity 0.2s, transform 0.2s; white-space: nowrap;
+}
+.withdraw.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+.undo {
+  position: fixed; left: 50%; bottom: calc(var(--safe-b) + 150px); transform: translateX(-50%);
+  display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 16px; border-radius: 999px;
+  background: var(--toast); border: 1px solid var(--line); font-weight: 700; font-size: 14px; white-space: nowrap;
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); animation: fadeIn 0.25s ease-out;
+}
+.undo[hidden] { display: none; }
+.undo button { padding: 8px 14px; border-radius: 999px; font-weight: 800; background: linear-gradient(135deg, var(--gold-1), var(--gold-2)); color: var(--on-acc); }
+.sheet .note { margin: -4px 0 0; font-size: 12px; line-height: 1.4; color: var(--muted); font-weight: 600; }
+[data-theme='pixel'] .undo, [data-theme='pixel'] .undo button { border-radius: 0; }
