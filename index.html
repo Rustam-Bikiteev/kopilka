@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#120c08" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="icon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Unbounded:wght@500;700;800&display=swap" rel="stylesheet" />
+    <title>Копилка</title>
+  </head>
+  <body>
+    <div id="stage"></div>
+
+    <header id="hud" class="hud">
+      <div class="hud-row">
+        <button id="goalBtn" class="goal">
+          <span class="goal-label">Копим на</span>
+          <span id="goalName" class="goal-name">Мечта</span>
+        </button>
+        <div class="top-actions">
+          <button id="motionBtn" class="icon-btn" aria-label="Наклон">
+            <svg viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2.5" transform="rotate(-18 12 12)"/><path d="M3 9a9 9 0 0 1 2-4M21 15a9 9 0 0 1-2 4"/></svg>
+          </button>
+          <button id="menuBtn" class="icon-btn" aria-label="Настройки">
+            <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="amount"><span id="amount">0</span><span class="cur">₽</span></div>
+      <div class="target">из <span id="target">10 000</span> ₽ <span class="dot"></span> <span id="pct">0%</span></div>
+      <div class="bar"><i id="barFill"></i></div>
+    </header>
+
+    <footer id="controls" class="controls">
+      <div class="chips">
+        <button class="chip" data-add="10">+10</button>
+        <button class="chip" data-add="50">+50</button>
+        <button class="chip" data-add="100">+100</button>
+        <button class="chip" data-add="500">+500</button>
+      </div>
+      <div class="main-row">
+        <button id="shakeBtn" class="side-btn">
+          <svg viewBox="0 0 24 24"><path d="M9 4h6l1 3v11a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2V7z"/><path d="M4 9l-2 3 2 3M20 9l2 3-2 3"/></svg>
+          <span>Встряхнуть</span>
+        </button>
+        <button id="pourBtn" class="pour" aria-label="Сыпать монеты">
+          <span class="pour-coin"><b>₽</b></span>
+          <span id="pourCount" class="pour-count"></span>
+        </button>
+        <div class="side-btn hint">
+          <svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 20h14"/></svg>
+          <span>Держи,<br />чтобы сыпать</span>
+        </div>
+      </div>
+    </footer>
+
+    <div id="floaters"></div>
+    <div id="toast" class="toast"></div>
+
+    <dialog id="settings">
+      <form method="dialog" class="sheet">
+        <h2>Копилка</h2>
+        <label>На что копим<input id="fName" maxlength="24" autocomplete="off" /></label>
+        <label>Цель, ₽<input id="fTarget" type="number" inputmode="numeric" min="1" step="1" /></label>
+        <div class="sheet-actions">
+          <button value="reset" class="ghost danger">Обнулить</button>
+          <button value="cancel" class="ghost">Отмена</button>
+          <button value="save" class="primary">Сохранить</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
