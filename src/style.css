@@ -278,28 +278,6 @@ dialog[open] { animation: sheetIn 0.28s cubic-bezier(0.2, 0.9, 0.3, 1); }
   border: 1px dashed rgba(var(--fg), 0.35);
 }
 
-/* Photo field */
-.photo-field {
-  display: grid; grid-template-columns: 52px 1fr auto auto; align-items: center; gap: 10px;
-  padding: 10px; border-radius: 14px; background: rgba(var(--fg), 0.04); border: 1px solid var(--line);
-}
-.photo-thumb {
-  width: 52px; height: 52px; border-radius: 10px;
-  background: rgba(var(--fg), 0.06) center / cover no-repeat;
-  border: 1px dashed rgba(var(--fg), 0.2);
-}
-.photo-thumb.has { border-style: solid; }
-.photo-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.photo-text b { font-size: 14px; color: var(--text); }
-.photo-text span { font-size: 11px; color: var(--muted); font-weight: 600; }
-.sheet .photo-pick {
-  display: block; padding: 10px 12px; border-radius: 12px; cursor: pointer;
-  background: rgba(var(--fg), 0.08); color: var(--text); font-size: 13px; font-weight: 800;
-}
-.photo-clear { width: 34px; height: 34px; border-radius: 10px; background: rgba(var(--fg), 0.06); color: var(--muted); }
-.photo-clear[hidden] { display: none; }
-.sheet-actions[hidden], .sheet-actions button[hidden] { display: none; }
-
 /* Goal reached card */
 .goal-card {
   position: fixed; inset: 0; display: grid; place-items: center; padding: 24px;
@@ -335,34 +313,11 @@ dialog[open] { animation: sheetIn 0.28s cubic-bezier(0.2, 0.9, 0.3, 1); }
   box-shadow: 0 0 40px rgba(255, 180, 230, 0.6);
 }
 
-/* Theme picker */
-.field { display: flex; flex-direction: column; gap: 8px; }
-.field-label { font-size: 12px; font-weight: 700; color: var(--muted); }
-.themes { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 4px; scrollbar-width: none; }
-.themes::-webkit-scrollbar { display: none; }
-.theme-opt {
-  flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 6px;
-  font-size: 11px; font-weight: 700; color: var(--muted);
-}
-.theme-opt i {
-  display: block; width: 52px; height: 52px; border-radius: 14px;
-  border: 2px solid transparent; box-shadow: inset 0 0 0 1px rgba(var(--fg), 0.12);
-  transition: border-color 0.2s, transform 0.15s;
-}
-.theme-opt:active i { transform: scale(0.92); }
-.theme-opt.cur { color: var(--text); }
-.theme-opt.cur i { border-color: rgb(var(--acc)); }
-.theme-opt[data-theme='warm'] i { background: radial-gradient(circle at 50% 70%, #f3c552 0 22%, transparent 24%), linear-gradient(180deg, #2a1a10 55%, #5a3820 55%); }
-.theme-opt[data-theme='neon'] i { background: radial-gradient(circle at 50% 70%, #ff4fd0 0 22%, transparent 24%), repeating-linear-gradient(90deg, transparent 0 9px, rgba(255, 60, 200, 0.5) 9px 10px), linear-gradient(180deg, #1a0b33 55%, #0c0420 55%); }
-.theme-opt[data-theme='clay'] i { background: radial-gradient(circle at 50% 70%, #ffc857 0 22%, transparent 24%), linear-gradient(180deg, #fbe9dc 55%, #dca28a 55%); }
-.theme-opt[data-theme='lux'] i { background: radial-gradient(circle at 50% 70%, #e6c068 0 22%, transparent 24%), linear-gradient(180deg, #111 55%, #050505 55%); box-shadow: inset 0 0 0 1px rgba(230, 192, 104, 0.4); }
-.theme-opt[data-theme='pixel'] i { border-radius: 0; background: conic-gradient(from 90deg at 50% 70%, #ffd020 0 0) 20px 30px / 12px 12px no-repeat, linear-gradient(180deg, #23256a 55%, #7a4a30 55%); image-rendering: pixelated; }
-
 /* Pixel theme: square everything */
 [data-theme='pixel'] .icon-btn, [data-theme='pixel'] .chip, [data-theme='pixel'] .sheet,
 [data-theme='pixel'] .sheet input, [data-theme='pixel'] .sheet-actions button, [data-theme='pixel'] .toast,
 [data-theme='pixel'] .goal-card-inner, [data-theme='pixel'] .bar, [data-theme='pixel'] .bar i,
-[data-theme='pixel'] .photo-field, [data-theme='pixel'] .photo-thumb, [data-theme='pixel'] .combo { border-radius: 0; }
+[data-theme='pixel'] .combo { border-radius: 0; }
 [data-theme='pixel'] .chip { font-size: 11px; }
 [data-theme='pixel'] .amount { filter: drop-shadow(3px 3px 0 #000); letter-spacing: 0; }
 [data-theme='pixel'] .pour-coin b { font-size: 26px; }
@@ -389,5 +344,45 @@ dialog[open] { animation: sheetIn 0.28s cubic-bezier(0.2, 0.9, 0.3, 1); }
 }
 .undo[hidden] { display: none; }
 .undo button { padding: 8px 14px; border-radius: 999px; font-weight: 800; background: linear-gradient(135deg, var(--gold-1), var(--gold-2)); color: var(--on-acc); }
-.sheet .note { margin: -4px 0 0; font-size: 12px; line-height: 1.4; color: var(--muted); font-weight: 600; }
 [data-theme='pixel'] .undo, [data-theme='pixel'] .undo button { border-radius: 0; }
+
+/* Inline editing on the main screen */
+.goal { cursor: text; }
+.inline-field {
+  font: inherit; color: inherit; background: transparent; border: 0; padding: 0 2px; margin: 0;
+  border-radius: 6px; outline: none; min-width: 2ch;
+  -webkit-user-select: text; user-select: text;
+  border-bottom: 1px dashed rgba(var(--fg), 0.25);
+  transition: background 0.2s, border-color 0.2s;
+}
+.inline-field:focus { background: rgba(var(--fg), 0.08); border-bottom-color: rgb(var(--acc)); }
+.goal-name.inline-field { max-width: 52vw; text-overflow: ellipsis; }
+.target-field { font-weight: 700; color: var(--text); text-align: center; }
+
+.pager-row { display: flex; justify-content: center; align-items: center; gap: 6px; margin-top: 6px; }
+.pager-row .pager { margin-top: 0; }
+.cycle-btn {
+  display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%;
+  color: var(--muted); background: var(--glass); border: 1px solid var(--line);
+  transition: transform 0.2s, color 0.2s;
+}
+.cycle-btn:active { transform: rotate(120deg) scale(0.9); color: var(--text); }
+.cycle-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+.reset-btn { transition: transform 0.12s, color 0.2s, opacity 0.2s; }
+.reset-btn.armed { color: #ff8a7a; }
+.reset-btn.armed svg { animation: wobble 0.4s ease-in-out infinite; }
+.reset-btn.off { opacity: 0.3; pointer-events: none; }
+@keyframes wobble { 25% { transform: rotate(-10deg); } 75% { transform: rotate(10deg); } }
+
+.icon-btn.armable { position: relative; }
+.icon-btn .arm-text { display: none; }
+.icon-btn.armable.armed { background: #d9483b; border-color: #d9483b; color: #fff; }
+.icon-btn.armable.armed svg { display: none; }
+.icon-btn.armable.armed .arm-text { display: block; font-weight: 800; font-size: 16px; }
+.icon-btn.armable:not(.off)::after {
+  content: ''; position: absolute; top: 6px; right: 6px; width: 7px; height: 7px; border-radius: 50%;
+  background: rgb(var(--acc)); box-shadow: 0 0 6px rgb(var(--acc));
+}
+.icon-btn.armable.armed::after { display: none; }
+[data-theme='pixel'] .cycle-btn, [data-theme='pixel'] .inline-field { border-radius: 0; }

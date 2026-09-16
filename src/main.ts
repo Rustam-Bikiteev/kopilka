@@ -21,9 +21,9 @@ import { Sound } from './audio';
 import { Motion } from './motion';
 import { Confetti, Fx, MERGE_DELAY } from './fx';
 import { MILESTONES, freshBank, load, milestoneFloor, save } from './store';
-import { deletePhoto, drawReveal, getPhoto, loadBitmap, putPhoto } from './photo';
-import { Sheet, type SheetValues } from './sheet';
-import { loadThemeFonts, setTheme, theme } from './theme';
+import { deletePhoto, drawReveal, getPhoto, importPhoto, loadBitmap, putPhoto } from './photo';
+import { THEMES, loadThemeFonts, setTheme, theme } from './theme';
+import { armed } from './armed';
 
 const S = 50; // virtual px per physics unit
 const G = 75; // base gravity, units/s^2 (stylised: faster than real for a snappier fall)
@@ -536,7 +536,7 @@ async function boot() {
   function tickWithdraw(dt: number) {
     const upside = physics.gravity.y < FLIP_G * G;
     if (!flip) {
-      if (!upside || slide || sheet.isOpen || amountDlg.open) return;
+      if (!upside || slide || amountDlg.open) return;
       const b = bank();
       flip = { up: 0, down: 0, open: false, total: 0, reached: b.reached ?? 0, wait: 0 };
     }
@@ -659,9 +659,10 @@ async function boot() {
     }
     const pct = b.target > 0 ? b.amount / b.target : 0;
     $('pct').textContent = `${Math.floor(pct * 100)}%`;
-    $('target').textContent = fmt.format(b.target);
     $('barFill').style.width = `${clamp(pct, 0, 1) * 100}%`;
-    $('goalName').textContent = b.name;
+    // inline fields: don't fight the user while they type
+    if (document.activeElement !== targetInput) setField(targetInput, fmt.format(b.target));
+    if (document.activeElement !== nameInput) setField(nameInput, b.name);
     glow.alpha = 0.12 + clamp(pct, 0, 1) * 0.55 + flash * 0.9;
   }
 
@@ -836,6 +837,17 @@ async function boot() {
     if (next) switchTo(next.id, dir);
     else jiggle = Math.min(1, jiggle + 0.4);
   }
+  /** Next bank, wrapping around. */
+  function cycle() {
+    const n = state.banks.length;
+    if (n < 2) {
+      jiggle = Math.min(1, jiggle + 0.4);
+      toast('Копилка пока одна. Добавь ещё через «+»');
+      return;
+    }
+    const i = state.banks.findIndex((b) => b.id === state.current);
+    switchTo(state.banks[(i + 1) % n].id, 1);
+  }
   function tickSlide(dt: number) {
     if (!slide) return;
     slide.t += dt;
@@ -862,6 +874,8 @@ async function boot() {
 
   const pager = $('pager');
   function renderPager() {
+    reset.refresh();
+    photo_.refresh();
     pager.replaceChildren();
     const cur = state.banks.findIndex((b) => b.id === state.current);
     state.banks.forEach((b, i) => {
@@ -877,7 +891,7 @@ async function boot() {
     add.className = 'add';
     add.setAttribute('aria-label', 'Новая копилка');
     add.innerHTML = '<span>+</span>';
-    add.addEventListener('click', () => sheet.open('create'));
+    add.addEventListener('click', createBank);
     pager.appendChild(add);
   }
 
@@ -892,7 +906,7 @@ async function boot() {
     if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.3) step(dx < 0 ? 1 : -1);
   };
   $('hud').addEventListener('pointerdown', (e) => {
-    if (!(e.target as HTMLElement).closest('button')) startSwipe(e);
+    if (!(e.target as HTMLElement).closest('button, input, label')) startSwipe(e);
   });
   $('hud').addEventListener('pointerup', endSwipe);
   wrap.addEventListener('pointerup', endSwipe);
@@ -934,79 +948,154 @@ async function boot() {
   $('goalMore').addEventListener('click', () => (goalCard.hidden = true));
   $('goalNew').addEventListener('click', () => {
     goalCard.hidden = true;
-    sheet.open('create');
+    createBank();
   });
 
-  // Settings sheet
-  async function applyPhoto(id: string, blob: Blob | null | undefined) {
+  // Inline editing of the goal name and target
+  const nameInput = $<HTMLInputElement>('goalName');
+  const targetInput = $<HTMLInputElement>('target');
+  function setField(el: HTMLInputElement, v: string) {
+    if (el.value !== v) el.value = v;
+    el.style.width = `${Math.max(2, v.length + 0.5)}ch`;
+  }
+  const blurOnEnter = (e: KeyboardEvent) => {
+    if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+  };
+  nameInput.addEventListener('keydown', blurOnEnter);
+  targetInput.addEventListener('keydown', blurOnEnter);
+  nameInput.addEventListener('input', () => setField(nameInput, nameInput.value));
+  nameInput.addEventListener('focus', () => nameInput.select());
+  nameInput.addEventListener('blur', () => {
+    const b = bank();
+    const name = nameInput.value.trim() || 'Мечта';
+    if (name !== b.name) {
+      b.name = name;
+      paintJar();
+      renderPager();
+      dirty = true;
+    }
+    setField(nameInput, b.name);
+  });
+  targetInput.addEventListener('focus', () => {
+    setField(targetInput, String(bank().target));
+    targetInput.select();
+  });
+  targetInput.addEventListener('input', () => {
+    setField(targetInput, targetInput.value.replace(/\D/g, '').slice(0, 9));
+  });
+  targetInput.addEventListener('blur', () => {
+    const b = bank();
+    const n = Number(targetInput.value.replace(/\D/g, ''));
+    if (n > 0 && n !== b.target) {
+      b.target = n;
+      // a raised target re-opens the milestones above the new percentage
+      b.reached = Math.min(b.reached ?? 0, milestoneFloor(b));
+      photoP = -1;
+      renderPager();
+      dirty = true;
+    }
+    setField(targetInput, fmt.format(b.target));
+  });
+
+  function createBank() {
+    const nb = freshBank('Новая цель', 50000);
+    nb.reached = 0;
+    state.banks.push(nb);
+    save(state);
+    renderPager();
+    switchTo(nb.id, 1);
+    // let the slide finish, then invite to name it
+    setTimeout(() => nameInput.focus(), (SLIDE_OUT + SLIDE_IN) * 1000 + 50);
+  }
+
+  // Reset, or delete an already empty bank when there are others
+  const resetBtn = $('resetBtn');
+  const reset = armed(
+    resetBtn,
+    $('resetText'),
+    () => {
+      const b = bank();
+      if (b.amount > 0 || (b.lucky ?? 0) > 0) return ['Обнулить', 'Точно?'];
+      if (state.banks.length > 1) return ['Удалить', 'Удалить?'];
+      return null;
+    },
+    () => {
+      const b = bank();
+      if (b.amount > 0 || (b.lucky ?? 0) > 0) resetBank();
+      else removeBank();
+    },
+  );
+  function resetBank() {
+    const b = bank();
+    b.amount = 0;
+    b.lucky = 0;
+    b.reached = 0;
+    clearJar();
+    shown = 0;
+    photoP = -1;
+    renderLucky();
+    renderPager();
+    persist();
+    toast('Копилка обнулена');
+  }
+  function removeBank() {
+    if (state.banks.length < 2) return;
+    const i = state.banks.findIndex((b) => b.id === state.current);
+    const [gone] = state.banks.splice(i, 1);
+    void deletePhoto(gone.id);
+    const next = state.banks[Math.min(i, state.banks.length - 1)];
+    // the removed bank is already out of the list; don't write its coins anywhere
+    switchTo(next.id, -1, false);
+    toast(`Копилка «${gone.name}» удалена`);
+  }
+
+  $('cycleBtn').addEventListener('click', cycle);
+
+  // Theme: cycles through the list
+  $('themeBtn').addEventListener('click', async () => {
+    const i = THEMES.findIndex((t) => t.id === theme().id);
+    const next = THEMES[(i + 1) % THEMES.length];
+    setTheme(next.id);
+    state.theme = next.id;
+    save(state);
+    toast(`Тема: ${next.name}`, 1200);
+    await loadThemeFonts(theme());
+    layout();
+  });
+
+  // Goal photo: pick one; with a photo already set, a confirmed tap removes it
+  const photoInput = $<HTMLInputElement>('fPhoto');
+  async function applyPhoto(id: string, blob: Blob | null) {
     const b = state.banks.find((x) => x.id === id);
-    if (!b || blob === undefined) return;
+    if (!b) return;
     if (blob) await putPhoto(id, blob);
     else await deletePhoto(id);
     b.photo = !!blob;
     save(state);
     if (id === state.current) void loadPhoto();
+    photo_.refresh();
   }
-  const sheet = new Sheet({
-    save(v: SheetValues) {
-      const b = bank();
-      b.name = v.name || 'Мечта';
-      if (v.target > 0) b.target = v.target;
-      // a raised target re-opens the milestones above the new percentage
-      b.reached = Math.min(b.reached ?? 0, milestoneFloor(b));
-      paintJar();
-      renderPager();
-      void applyPhoto(b.id, v.photo);
-      dirty = true;
-    },
-    create(v: SheetValues) {
-      const nb = freshBank(v.name || 'Новая цель', v.target > 0 ? v.target : 50000);
-      nb.reached = 0;
-      state.banks.push(nb);
-      save(state);
-      renderPager();
-      void applyPhoto(nb.id, v.photo ?? undefined).then(() => switchTo(nb.id, 1));
-      if (!v.photo) switchTo(nb.id, 1);
-    },
-    reset() {
-      const b = bank();
-      b.amount = 0;
-      b.lucky = 0;
-      b.reached = 0;
-      clearJar();
-      shown = 0;
-      photoP = -1;
-      renderLucky();
-      renderPager();
-      persist();
-      toast('Копилка обнулена');
-    },
-    async theme(id: string) {
-      setTheme(id);
-      state.theme = id;
-      save(state);
-      await loadThemeFonts(theme());
-      layout();
-    },
-    remove() {
-      if (state.banks.length < 2) return;
-      const i = state.banks.findIndex((b) => b.id === state.current);
-      const [gone] = state.banks.splice(i, 1);
-      void deletePhoto(gone.id);
-      const next = state.banks[Math.min(i, state.banks.length - 1)];
-      // the removed bank is already out of the list; don't write its coins anywhere
-      switchTo(next.id, -1, false);
-      toast(`Копилка «${gone.name}» удалена`);
-    },
+  photoInput.addEventListener('change', async () => {
+    const f = photoInput.files?.[0];
+    photoInput.value = '';
+    if (!f) return;
+    try {
+      await applyPhoto(state.current, await importPhoto(f));
+      toast('Фото проявится по мере накопления');
+    } catch {
+      toast('Не получилось открыть фото');
+    }
   });
-  const openSettings = async () => {
-    const b = bank();
-    const blob = b.photo ? await getPhoto(b.id) : undefined;
-    sheet.markTheme(theme().id);
-    sheet.open('edit', { name: b.name, target: b.target, photo: blob, canDelete: state.banks.length > 1 });
-  };
-  $('menuBtn').addEventListener('click', () => void openSettings());
-  $('goalBtn').addEventListener('click', () => void openSettings());
+  const photoBtn = $('photoBtn');
+  photoBtn.addEventListener('click', () => {
+    if (!bank().photo) photoInput.click();
+  });
+  const photo_ = armed(
+    photoBtn,
+    $('photoText'),
+    () => (bank().photo ? ['', '✕'] : null),
+    () => void applyPhoto(state.current, null),
+  );
 
   // Persistence
   let dirty = false;
@@ -1036,6 +1125,15 @@ async function boot() {
   renderHud(1);
   renderLucky();
   renderPager();
+  // the flip gesture has no button: tell about it once
+  try {
+    if (!localStorage.getItem('kopilka.flipHint')) {
+      setTimeout(() => toast('Чтобы снять деньги, переверни телефон вверх дном', 3200), 2500);
+      localStorage.setItem('kopilka.flipHint', '1');
+    }
+  } catch {
+    /* storage unavailable */
+  }
   void loadPhoto();
 
   let resizeTimer = 0;
