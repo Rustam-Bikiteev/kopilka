@@ -23,6 +23,7 @@ import { Confetti, Fx, MERGE_DELAY } from './fx';
 import { MILESTONES, freshBank, load, milestoneFloor, save } from './store';
 import { deletePhoto, drawReveal, getPhoto, loadBitmap, putPhoto } from './photo';
 import { Sheet, type SheetValues } from './sheet';
+import { loadThemeFonts, setTheme, theme } from './theme';
 
 const S = 50; // virtual px per physics unit
 const G = 75; // base gravity, units/s^2 (stylised: faster than real for a snappier fall)
@@ -71,8 +72,10 @@ async function boot() {
   const state = load();
   const bank = () => state.banks.find((b) => b.id === state.current) ?? state.banks[0];
 
+  setTheme(state.theme);
   await RAPIER.init();
   await Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 1500))]);
+  await loadThemeFonts(theme());
 
   const wrap = $('stage');
   const app = new Application();
@@ -153,23 +156,30 @@ async function boot() {
   let shineTex: Texture[] = [];
   let shadowTex: Texture[] = [];
 
+  /** Texture from a painted canvas; the pixel theme upscales low-res paint without smoothing. */
+  const tex = (canvas: HTMLCanvasElement) => {
+    const t = Texture.from(canvas);
+    if (theme().pixel) t.source.scaleMode = 'nearest';
+    return t;
+  };
   const swap = (sprite: Sprite, canvas: HTMLCanvasElement) => {
     const old = sprite.texture;
-    sprite.texture = Texture.from(canvas);
+    sprite.texture = tex(canvas);
     if (old && old !== Texture.EMPTY) old.destroy(true);
   };
 
   function paintJar() {
-    swap(jarFront, drawJarFront(res, bank().name));
+    swap(jarFront, drawJarFront(jarRes(), bank().name));
     jarFront.width = jarBack.width = JAR_TEX_W;
     jarFront.height = jarBack.height = JAR_TEX_H;
   }
 
   function paintCoins() {
     const old = [...faceTex, ...shineTex, ...shadowTex];
-    faceTex = COIN_TYPES.map((t) => Texture.from(drawCoinFace(t, res)));
-    shineTex = COIN_TYPES.map((t) => Texture.from(drawCoinShine(t, res)));
-    shadowTex = COIN_TYPES.map((t) => Texture.from(drawCoinShadow(t, res)));
+    const r = theme().pixel?.coin ?? res;
+    faceTex = COIN_TYPES.map((t) => tex(drawCoinFace(t, r)));
+    shineTex = COIN_TYPES.map((t) => tex(drawCoinShine(t, r)));
+    shadowTex = COIN_TYPES.map((t) => tex(drawCoinShadow(t, r)));
     for (const c of coins) {
       c.sprites[0].texture = shadowTex[c.type];
       c.sprites[1].texture = faceTex[c.type];
@@ -193,7 +203,7 @@ async function boot() {
     if (!force && (step === photoP || now - photoBakedAt < 160)) return;
     photoP = step;
     photoBakedAt = now;
-    swap(photo, drawReveal(photoImg, step, Math.min(res, 2)));
+    swap(photo, drawReveal(photoImg, step, Math.min(jarRes(), 2)));
     photo.width = JAR_TEX_W;
     photo.height = JAR_TEX_H;
     photo.alpha = 0.75 + 0.25 * step;
@@ -217,6 +227,7 @@ async function boot() {
     paintPhoto(true);
   }
 
+  const jarRes = () => theme().pixel?.jar ?? res;
   let baseX = 0;
   let vw = wrap.clientWidth;
   let vh = wrap.clientHeight;
@@ -228,18 +239,21 @@ async function boot() {
     const availH = Math.max(160, bottom - top);
     const sceneW = JAR.W + 60;
     const sceneH = JAR.H + 30;
-    scale = Math.min((vw - 16) / sceneW, availH / sceneH, 1.7);
+    // a collapsed viewport (hidden webview) must not produce a negative scale
+    scale = Math.max(0.1, Math.min((vw - 16) / sceneW, availH / sceneH, 1.7));
     world.scale.set(scale);
     const jarTop = top + (availH - sceneH * scale) / 2 + 4 * scale;
     baseX = Math.round(vw / 2);
     world.position.set(baseX, Math.round(jarTop + pivotY * scale));
     res = Math.min(3, scale * app.renderer.resolution);
 
-    const bgRes = Math.min(2, app.renderer.resolution);
+    const bgRes = theme().pixel?.bg ?? Math.min(2, app.renderer.resolution);
     swap(bg, drawBackground(vw, vh, bgRes, jarTop + JAR.H * scale, vw / 2, JAR.W * scale));
     bg.width = vw;
     bg.height = vh;
-    swap(jarBack, drawJarBack(res));
+    swap(jarBack, drawJarBack(jarRes()));
+    glow.tint = theme().glow;
+    fx.tint = theme().sparkle;
     paintJar();
     paintCoins();
     paintPhoto(true);
@@ -853,6 +867,13 @@ async function boot() {
       persist();
       toast('Копилка обнулена');
     },
+    async theme(id: string) {
+      setTheme(id);
+      state.theme = id;
+      save(state);
+      await loadThemeFonts(theme());
+      layout();
+    },
     remove() {
       if (state.banks.length < 2) return;
       const i = state.banks.findIndex((b) => b.id === state.current);
@@ -867,6 +888,7 @@ async function boot() {
   const openSettings = async () => {
     const b = bank();
     const blob = b.photo ? await getPhoto(b.id) : undefined;
+    sheet.markTheme(theme().id);
     sheet.open('edit', { name: b.name, target: b.target, photo: blob, canDelete: state.banks.length > 1 });
   };
   $('menuBtn').addEventListener('click', () => void openSettings());

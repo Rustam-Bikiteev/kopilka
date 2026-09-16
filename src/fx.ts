@@ -25,11 +25,13 @@ const GHOST_TIME = 0.22;
 /** Sparkle bursts and merge "ghosts" (coins flying into each other). Coordinates are jar pixels. */
 export class Fx {
   readonly layer = new Container();
+  /** default sparkle tint, set by the theme */
+  tint = 0xffffff;
   private tex = Texture.from(drawSparkle());
   private parts: Particle[] = [];
   private ghosts: Ghost[] = [];
 
-  burst(x: number, y: number, count: number, power = 1, tint = 0xffffff) {
+  burst(x: number, y: number, count: number, power = 1, tint = this.tint) {
     for (let k = 0; k < count; k++) {
       const a = Math.random() * Math.PI * 2;
       const v = (40 + Math.random() * 140) * power;

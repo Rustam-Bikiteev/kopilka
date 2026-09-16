@@ -1,4 +1,5 @@
 import { importPhoto } from './photo';
+import { THEMES } from './theme';
 
 export interface SheetValues {
   name: string;
@@ -12,6 +13,7 @@ export interface SheetHandlers {
   create(v: SheetValues): void;
   reset(): void;
   remove(): void;
+  theme(id: string): void;
 }
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -33,6 +35,19 @@ export class Sheet {
   private disarmers: (() => void)[] = [];
 
   constructor(private h: SheetHandlers) {
+    const themes = $('themes');
+    for (const t of THEMES) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'theme-opt';
+      btn.dataset.theme = t.id;
+      btn.innerHTML = `<i></i><span>${t.name}</span>`;
+      btn.addEventListener('click', () => {
+        this.markTheme(t.id);
+        this.h.theme(t.id);
+      });
+      themes.appendChild(btn);
+    }
     this.armed($<HTMLButtonElement>('resetBtn'), 'Обнулить', 'reset');
     this.armed(this.deleteBtn, 'Удалить', 'delete');
 
@@ -79,6 +94,10 @@ export class Sheet {
 
   get isOpen() {
     return this.dialog.open;
+  }
+
+  markTheme(id: string) {
+    $('themes').querySelectorAll<HTMLElement>('.theme-opt').forEach((b) => b.classList.toggle('cur', b.dataset.theme === id));
   }
 
   open(mode: 'edit' | 'create', opts: { name?: string; target?: number; photo?: Blob; canDelete?: boolean } = {}) {

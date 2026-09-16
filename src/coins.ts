@@ -1,3 +1,5 @@
+import { theme, type Pal } from './theme';
+
 export type Metal = 'gold' | 'silver' | 'lucky';
 
 export interface CoinType {
@@ -43,11 +45,8 @@ export const COIN_PAD = 3;
 export const extent = (t: CoinType) => (t.bar ? t.bar.w / 2 : t.r);
 export const area = (t: CoinType) => (t.bar ? t.bar.w * t.bar.h : Math.PI * t.r * t.r);
 
-const PAL = {
-  gold: { hi: '#fff4c7', mid: '#f3c552', lo: '#b27b1b', edge: '#6e4a0c', f1: '#d49a2c', f2: '#ffe38f', ink: '#c89024' },
-  silver: { hi: '#ffffff', mid: '#dce2e9', lo: '#8e98a6', edge: '#4f5865', f1: '#a9b2be', f2: '#f6f8fb', ink: '#a3adba' },
-  lucky: { hi: '#fff7e0', mid: '#ffcf5c', lo: '#e0587a', edge: '#7a1f4a', f1: '#ff9ec4', f2: '#fff1a8', ink: '#ffffff' },
-};
+const LUCKY_PAL: Pal = { hi: '#fff7e0', mid: '#ffcf5c', lo: '#e0587a', edge: '#7a1f4a', f1: '#ff9ec4', f2: '#fff1a8', ink: '#ffffff' };
+const pal = (m: Metal) => (m === 'lucky' ? LUCKY_PAL : theme().coin[m]);
 
 function coinCanvas(t: CoinType, res: number) {
   const half = extent(t) + COIN_PAD;
@@ -80,7 +79,7 @@ function star(ctx: CanvasRenderingContext2D, r: number, inner: number, points = 
 export function drawCoinFace(t: CoinType, res: number) {
   if (t.bar) return drawBar(t, res);
   const { c, ctx } = coinCanvas(t, res);
-  const p = PAL[t.metal];
+  const p = pal(t.metal);
   const r = t.r;
 
   let g: CanvasGradient = ctx.createLinearGradient(-r, -r, r, r);
@@ -114,7 +113,7 @@ export function drawCoinFace(t: CoinType, res: number) {
   ctx.stroke();
 
   const ri = r * 0.76;
-  const pi = PAL[t.inner ?? t.metal];
+  const pi = pal(t.inner ?? t.metal);
   g = ctx.createLinearGradient(-ri, -ri, ri, ri);
   g.addColorStop(0, pi.f1);
   g.addColorStop(1, pi.f2);
@@ -157,7 +156,7 @@ export function drawCoinFace(t: CoinType, res: number) {
 
   const label = String(t.value);
   const fs = r * (label.length > 2 ? 0.6 : label.length > 1 ? 0.78 : 0.98);
-  ctx.font = `800 ${fs}px Unbounded, Manrope, system-ui, sans-serif`;
+  ctx.font = `800 ${fs}px ${theme().font}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   const y = fs * 0.04;
@@ -173,6 +172,7 @@ export function drawCoinFace(t: CoinType, res: number) {
 /** Gold ingot seen from the side; its lighting is baked in because the shine layer is skipped for bars. */
 function drawBar(t: CoinType, res: number) {
   const { c, ctx } = coinCanvas(t, res);
+  const T = theme();
   const { w, h } = t.bar!;
   const x0 = -w / 2;
   const y0 = -h / 2;
@@ -188,13 +188,13 @@ function drawBar(t: CoinType, res: number) {
   ctx.lineTo(x0, -y0);
   ctx.closePath();
   let g = ctx.createLinearGradient(0, y0, 0, -y0);
-  g.addColorStop(0, '#fff3c0');
-  g.addColorStop(0.35, '#f3c552');
-  g.addColorStop(1, '#9c6a14');
+  g.addColorStop(0, T.bar[0]);
+  g.addColorStop(0.35, T.bar[1]);
+  g.addColorStop(1, T.bar[2]);
   ctx.fillStyle = g;
   ctx.fill();
   ctx.shadowColor = 'transparent';
-  ctx.strokeStyle = 'rgba(110,74,12,0.8)';
+  ctx.strokeStyle = T.coin.gold.edge;
   ctx.lineWidth = 0.8;
   ctx.stroke();
 
@@ -211,7 +211,7 @@ function drawBar(t: CoinType, res: number) {
   ctx.fillStyle = g;
   ctx.fill();
 
-  ctx.font = `800 ${h * (t.value >= 5000 ? 0.36 : 0.42)}px Unbounded, Manrope, system-ui, sans-serif`;
+  ctx.font = `800 ${h * (t.value >= 5000 ? 0.36 : 0.42) * (T.pixel ? 0.8 : 1)}px ${T.font}`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   const cy = h * 0.14;
@@ -219,7 +219,7 @@ function drawBar(t: CoinType, res: number) {
   ctx.fillText(String(t.value), -0.6, cy - 0.6);
   ctx.fillStyle = 'rgba(80,50,0,0.55)';
   ctx.fillText(String(t.value), 0.6, cy + 0.6);
-  ctx.fillStyle = '#c28a22';
+  ctx.fillStyle = T.barInk;
   ctx.fillText(String(t.value), 0, cy);
 
   ctx.fillStyle = 'rgba(255,255,255,0.5)';

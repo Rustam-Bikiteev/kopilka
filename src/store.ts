@@ -18,6 +18,7 @@ export interface Bank {
 export interface State {
   current: string;
   banks: Bank[];
+  theme?: string;
 }
 
 const KEY = 'kopilka.v1';
