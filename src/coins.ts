@@ -10,6 +10,8 @@ export interface CoinType {
   /** bimetal: different metal for the centre field */
   inner?: Metal;
   bar?: { w: number; h: number };
+  /** short face text for big denominations */
+  label?: string;
 }
 
 export const COIN_TYPES: CoinType[] = [
@@ -22,11 +24,18 @@ export const COIN_TYPES: CoinType[] = [
   { value: 1000, r: 12, metal: 'gold', bar: { w: 54, h: 24 } },
   { value: 0, r: 13, metal: 'lucky' },
   { value: 5000, r: 17, metal: 'gold', bar: { w: 74, h: 34 } },
+  { value: 10_000, r: 18, metal: 'gold', bar: { w: 82, h: 36 }, label: '10К' },
+  { value: 50_000, r: 19, metal: 'silver', bar: { w: 88, h: 38 }, label: '50К' },
+  { value: 100_000, r: 20, metal: 'gold', bar: { w: 96, h: 42 }, label: '100К' },
+  { value: 500_000, r: 21, metal: 'silver', bar: { w: 104, h: 46 }, label: '500К' },
+  { value: 1_000_000, r: 22, metal: 'lucky', bar: { w: 112, h: 50 }, label: '1 МЛН' },
 ];
 
 export const LUCKY = 7;
-/** Largest type that a deposit is split into; bigger ones only appear by merging. */
-export const MAX_DEPOSIT_TYPE = 4;
+/** Money-carrying types, largest value first. */
+export const DENOMS = COIN_TYPES.map((_, i) => i)
+  .filter((i) => i !== LUCKY)
+  .sort((a, b) => COIN_TYPES[b].value - COIN_TYPES[a].value);
 
 /** `n` pieces of the key type fuse into one of type `to`, keeping the value. */
 export const MERGES: Record<number, { n: number; to: number }> = {
@@ -37,6 +46,11 @@ export const MERGES: Record<number, { n: number; to: number }> = {
   4: { n: 5, to: 5 },
   5: { n: 2, to: 6 },
   6: { n: 5, to: 8 },
+  8: { n: 2, to: 9 },
+  9: { n: 5, to: 10 },
+  10: { n: 2, to: 11 },
+  11: { n: 5, to: 12 },
+  12: { n: 2, to: 13 },
 };
 
 export const COIN_PAD = 3;
@@ -174,6 +188,8 @@ function drawBar(t: CoinType, res: number) {
   const { c, ctx } = coinCanvas(t, res);
   const T = theme();
   const { w, h } = t.bar!;
+  const p = pal(t.metal);
+  const stops = t.metal === 'gold' ? T.bar : [p.hi, p.mid, p.lo];
   const x0 = -w / 2;
   const y0 = -h / 2;
   const inset = h * 0.35;
@@ -188,13 +204,13 @@ function drawBar(t: CoinType, res: number) {
   ctx.lineTo(x0, -y0);
   ctx.closePath();
   let g = ctx.createLinearGradient(0, y0, 0, -y0);
-  g.addColorStop(0, T.bar[0]);
-  g.addColorStop(0.35, T.bar[1]);
-  g.addColorStop(1, T.bar[2]);
+  g.addColorStop(0, stops[0]);
+  g.addColorStop(0.35, stops[1]);
+  g.addColorStop(1, stops[2]);
   ctx.fillStyle = g;
   ctx.fill();
   ctx.shadowColor = 'transparent';
-  ctx.strokeStyle = T.coin.gold.edge;
+  ctx.strokeStyle = t.metal === 'gold' ? T.coin.gold.edge : p.edge;
   ctx.lineWidth = 0.8;
   ctx.stroke();
 
@@ -215,12 +231,13 @@ function drawBar(t: CoinType, res: number) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   const cy = h * 0.14;
+  const text = t.label ?? String(t.value);
   ctx.fillStyle = 'rgba(255,255,255,0.65)';
-  ctx.fillText(String(t.value), -0.6, cy - 0.6);
+  ctx.fillText(text, -0.6, cy - 0.6);
   ctx.fillStyle = 'rgba(80,50,0,0.55)';
-  ctx.fillText(String(t.value), 0.6, cy + 0.6);
-  ctx.fillStyle = T.barInk;
-  ctx.fillText(String(t.value), 0, cy);
+  ctx.fillText(text, 0.6, cy + 0.6);
+  ctx.fillStyle = t.metal === 'gold' ? T.barInk : p.edge;
+  ctx.fillText(text, 0, cy);
 
   ctx.fillStyle = 'rgba(255,255,255,0.5)';
   ctx.fillRect(x0 + inset * 0.3, y0 + h * 0.3, 1.2, h * 0.5);

@@ -8,7 +8,6 @@ import {
   COIN_PAD,
   COIN_TYPES,
   LUCKY,
-  MAX_DEPOSIT_TYPE,
   MERGES,
   area,
   drawCoinFace,
@@ -24,13 +23,13 @@ import { MILESTONES, freshBank, load, milestoneFloor, save } from './store';
 import { deletePhoto, drawReveal, getPhoto, importPhoto, loadBitmap, putPhoto } from './photo';
 import { THEMES, loadThemeFonts, setTheme, theme } from './theme';
 import { armed } from './armed';
+import { greedy, planCompact, planWithdraw, sumOf } from './ledger';
 
 const S = 50; // virtual px per physics unit
 const G = 75; // base gravity, units/s^2 (stylised: faster than real for a snappier fall)
 const K = G / 9.81;
 const DT = 1 / 120;
-const MAX_COINS = 240;
-// Share of the jar's inner area covered by coins: merge above MERGE_FILL, evict above MAX_FILL.
+// Share of the jar's inner area covered by coins: merge above MERGE_FILL, re-mint into bigger pieces above MAX_FILL.
 const MERGE_FILL = 0.4;
 const MAX_FILL = 0.62;
 const HIT_MIN = 1.2;
@@ -245,16 +244,19 @@ async function boot() {
     const availH = Math.max(160, bottom - top);
     const sceneW = JAR.W + 60;
     const sceneH = JAR.H + 30;
+    // leave the thumb rail on the right free
+    const rail = $('rail').getBoundingClientRect();
+    const fieldW = rail.width ? rail.left : vw;
     // a collapsed viewport (hidden webview) must not produce a negative scale
-    scale = Math.max(0.1, Math.min((vw - 16) / sceneW, availH / sceneH, 1.7));
+    scale = Math.max(0.1, Math.min((fieldW - 12) / sceneW, availH / sceneH, 1.7));
     world.scale.set(scale);
     const jarTop = top + (availH - sceneH * scale) / 2 + 4 * scale;
-    baseX = Math.round(vw / 2);
+    baseX = Math.round(fieldW / 2 + 4);
     world.position.set(baseX, Math.round(jarTop + pivotY * scale));
     res = Math.min(3, scale * app.renderer.resolution);
 
     const bgRes = theme().pixel?.bg ?? Math.min(2, app.renderer.resolution);
-    swap(bg, drawBackground(vw, vh, bgRes, jarTop + JAR.H * scale, vw / 2, JAR.W * scale));
+    swap(bg, drawBackground(vw, vh, bgRes, jarTop + JAR.H * scale, baseX, JAR.W * scale));
     bg.width = vw;
     bg.height = vh;
     swap(jarBack, drawJarBack(jarRes()));
@@ -327,12 +329,32 @@ async function boot() {
 
   const fill = () => coins.reduce((s, c) => s + area(COIN_TYPES[c.type]), 0) / jarArea;
 
-  function dropCoin(type: number) {
-    if (coins.length >= MAX_COINS || fill() > MAX_FILL) {
-      let victim: Coin | undefined;
-      for (const c of coins) if (c.type !== LUCKY && (!victim || c.type < victim.type)) victim = c;
-      removeCoin(victim ?? coins[0]);
+  /** Crowded jar: the smallest pieces fuse into fewer big ones, value kept exactly. */
+  function compact() {
+    const plan = planCompact(coins.map((c) => c.type));
+    if (!plan) return;
+    const group = plan.take.map((i) => coins[i]);
+    let cx = 0;
+    let cy = 0;
+    for (const c of group) {
+      const p = c.body.translation();
+      cx += (p.x * S) / group.length;
+      cy += (p.y * S) / group.length;
     }
+    for (const c of group) removeCoin(c, { x: cx, y: cy });
+    for (const t of plan.mint) {
+      const bar = !!COIN_TYPES[t].bar;
+      addCoin(t, cx + (Math.random() - 0.5) * 20, cy - 10, 0, -2, bar ? 0 : Math.random() * 6, 0, simTime + MERGE_DELAY, true);
+    }
+    setTimeout(() => {
+      sound.jingle(4, 0.2, 0.2);
+      fx.burst(cx, cy, 14, 1);
+    }, MERGE_DELAY * 1000);
+    dirty = true;
+  }
+
+  function dropCoin(type: number) {
+    if (fill() > MAX_FILL) compact();
     const t = COIN_TYPES[type];
     const e = extent(t);
     const span = NR - JAR.NL - 2 * JAR.GLASS - 2 * e - 12;
@@ -351,18 +373,8 @@ async function boot() {
     dirty = true;
   }
 
-  function decompose(amount: number) {
-    const out: number[] = [];
-    let rest = amount;
-    for (let i = MAX_DEPOSIT_TYPE; i >= 0 && out.length < 14; i--) {
-      while (rest >= COIN_TYPES[i].value && out.length < 14) {
-        out.push(i);
-        rest -= COIN_TYPES[i].value;
-      }
-    }
-    if (!out.length) out.push(0);
-    return out.sort(() => Math.random() - 0.5);
-  }
+  /** Exact pieces for an amount, shuffled so the drop looks lively. */
+  const decompose = (amount: number) => greedy(amount).sort(() => Math.random() - 0.5);
 
   const pending: number[] = [];
   let spawnWait = 0;
@@ -450,7 +462,7 @@ async function boot() {
             const p = c.body.translation();
             return { c, d: Math.hypot(p.x - sp.x, p.y - sp.y) * S };
           })
-          .filter((o) => o.d < 130)
+          .filter((o) => o.d < Math.max(130, extent(COIN_TYPES[type]) * 5))
           .sort((a, b) => a.d - b.d)
           .slice(0, need);
         if (near.length < need) continue;
@@ -570,11 +582,7 @@ async function boot() {
       const p = c.body.translation();
       return p.y * S < JAR.LID + extent(t) + 14 && Math.abs(p.x * S - JAR.W / 2) < SLOT_HALF + extent(t);
     });
-    if (!out) {
-      // coins evicted from a full jar still count: bring them back to fall out
-      if (!pending.length && !coins.some((c) => c.type !== LUCKY)) pending.push(...decompose(b.amount));
-      return;
-    }
+    if (!out) return;
     const p = out.body.translation();
     const v = Math.min(COIN_TYPES[out.type].value, b.amount);
     removeCoin(out, { x: p.x * S, y: -80 });
@@ -596,11 +604,58 @@ async function boot() {
     withdrawEl.classList.remove('show');
     if (total <= 0) return;
     renderPager();
+    offerUndo(total, reached);
+  }
+
+  function offerUndo(total: number, reached: number) {
     undoData = { id: state.current, total, reached };
     $('undoText').textContent = `Снято ${fmt.format(total)} ₽`;
     undoEl.hidden = false;
     clearTimeout(undoTimer);
     undoTimer = window.setTimeout(() => (undoEl.hidden = true), UNDO_MS);
+  }
+
+  /** Coins still queued count as money: put them in the jar first. */
+  function flushPending() {
+    while (pending.length) dropCoin(pending.shift()!);
+  }
+
+  /** Take exactly `n` out: pieces fly out of the slot, change falls back in. */
+  function withdraw(n: number) {
+    const b = bank();
+    if (n > b.amount) {
+      toast(`В копилке только ${fmt.format(b.amount)} ₽`);
+      return;
+    }
+    flushPending();
+    const plan = planWithdraw(coins.map((c) => c.type), n);
+    if (!plan) return;
+    const reached = b.reached ?? 0;
+    for (const c of plan.take.map((i) => coins[i])) removeCoin(c, { x: JAR.W / 2, y: -80 });
+    pending.push(...plan.change);
+    b.amount -= n;
+    b.reached = Math.min(reached, milestoneFloor(b));
+    sound.jingle(Math.min(8, 2 + plan.take.length), 0.22, 0.35);
+    fx.burst(JAR.W / 2, JAR.LID, 12, 0.9);
+    floater(`−${fmt.format(n)} ₽`);
+    navigator.vibrate?.(20);
+    renderPager();
+    offerUndo(n, reached);
+    dirty = true;
+  }
+
+  /** Old saves (and any drift) are brought back to "coins == balance". */
+  function reconcile() {
+    const b = bank();
+    const inJar = sumOf(coins.map((c) => c.type)) + sumOf(pending);
+    if (inJar < b.amount) pending.push(...decompose(b.amount - inJar));
+    else if (inJar > b.amount) {
+      flushPending();
+      const plan = planWithdraw(coins.map((c) => c.type), inJar - b.amount);
+      if (!plan) return;
+      for (const c of plan.take.map((i) => coins[i])) removeCoin(c);
+      pending.push(...plan.change);
+    }
   }
 
   $('undoBtn').addEventListener('click', () => {
@@ -656,6 +711,8 @@ async function boot() {
       }
       shownText = text;
       amountEl.textContent = text;
+      // long balances shrink to stay on one line
+      amountEl.parentElement!.style.setProperty('--fit', String(Math.min(1, 6.5 / text.length)));
     }
     const pct = b.target > 0 ? b.amount / b.target : 0;
     $('pct').textContent = `${Math.floor(pct * 100)}%`;
@@ -721,11 +778,15 @@ async function boot() {
     amountInput.value = '';
     amountDlg.returnValue = '';
     amountDlg.showModal();
-    setTimeout(() => amountInput.focus(), 50);
+    // focus inside the tap itself, otherwise iOS doesn't raise the keyboard
+    amountInput.focus();
   });
   amountDlg.addEventListener('close', () => {
     const n = Math.round(Number(amountInput.value));
-    if (amountDlg.returnValue === 'add' && n > 0) add(Math.min(n, 10_000_000));
+    amountInput.blur();
+    if (!(n > 0)) return;
+    if (amountDlg.returnValue === 'add') add(Math.min(n, 10_000_000));
+    else if (amountDlg.returnValue === 'take') withdraw(n);
   });
 
   $('shakeBtn').addEventListener('click', () => {
@@ -816,6 +877,7 @@ async function boot() {
     for (const [type, x, y, a] of bank().coins) {
       if (COIN_TYPES[type]) addCoin(type, x, y, 0, 0, a, 0);
     }
+    reconcile();
     shown = 0; // count up again: switching is a small reward too
     paintJar();
     void loadPhoto();
@@ -1122,9 +1184,16 @@ async function boot() {
   for (const [type, x, y, a] of bank().coins) {
     if (COIN_TYPES[type]) addCoin(type, x, y, 0, 0, a, 0);
   }
+  reconcile();
   renderHud(1);
   renderLucky();
   renderPager();
+  // portrait only, where the platform lets a page lock it
+  (screen.orientation as unknown as { lock?: (o: string) => Promise<void> } | undefined)?.lock?.('portrait').catch(() => undefined);
+  // iOS ignores user-scalable=no: stop pinch and double-tap zoom explicitly
+  document.addEventListener('gesturestart', (e) => e.preventDefault());
+  document.addEventListener('dblclick', (e) => e.preventDefault(), { passive: false });
+
   // the flip gesture has no button: tell about it once
   try {
     if (!localStorage.getItem('kopilka.flipHint')) {
