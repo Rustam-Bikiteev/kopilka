@@ -35,7 +35,6 @@ const MERGE_FILL = 0.4;
 const MAX_FILL = 0.62;
 const HIT_MIN = 1.2;
 const COMBO_WINDOW = 1.4;
-const PENTATONIC = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21, 24, 26, 28, 31];
 const LUCKY_CHANCE_ADD = 0.04;
 const LUCKY_CHANCE_POUR = 0.004;
 const MAX_LUCKY = 12;
@@ -378,15 +377,14 @@ async function boot() {
     dirty = true;
   }
 
-  // Combo: quick consecutive deposits climb a pentatonic scale
+  // Combo: quick consecutive deposits
   const comboEl = $('combo');
   let combo = 0;
   let comboLeft = 0;
   function bumpCombo() {
     combo++;
     comboLeft = COMBO_WINDOW;
-    const step = PENTATONIC[Math.min(combo - 1, PENTATONIC.length - 1)];
-    sound.chime(step, 0.22 + Math.min(combo, 10) * 0.012);
+    sound.clink(0.16 + Math.min(combo, 8) * 0.01, 0, 0, Math.min(combo, 6) * 0.5);
     if (combo < 2) return;
     comboEl.textContent = `×${combo}`;
     comboEl.classList.add('show');
@@ -467,7 +465,7 @@ async function boot() {
         const bar = !!COIN_TYPES[to].bar;
         addCoin(to, cx, cy, 0, -3, bar ? 0 : Math.random() * Math.PI * 2, (Math.random() - 0.5) * (bar ? 1 : 6), simTime + MERGE_DELAY, true);
         setTimeout(() => {
-          sound.chime(14 - type * 2, 0.26, pan(cx));
+          sound.jingle(2 + type, 0.2, 0.15);
           sound.impact('coin', 0.7, pan(cx));
           fx.burst(cx, cy, 8 + type * 2, 0.7 + type * 0.12);
           navigator.vibrate?.(12);
@@ -538,7 +536,7 @@ async function boot() {
   function tickWithdraw(dt: number) {
     const upside = physics.gravity.y < FLIP_G * G;
     if (!flip) {
-      if (!upside || slide || sheet.isOpen) return;
+      if (!upside || slide || sheet.isOpen || amountDlg.open) return;
       const b = bank();
       flip = { up: 0, down: 0, open: false, total: 0, reached: b.reached ?? 0, wait: 0 };
     }
@@ -552,7 +550,7 @@ async function boot() {
     if (!flip.open && flip.up >= FLIP_HOLD) {
       flip.open = true;
       stopPour();
-      sound.chime(12, 0.2);
+      sound.jingle(3, 0.2, 0.2);
       navigator.vibrate?.(30);
     }
     if (!flip.open || !upside) return;
@@ -714,6 +712,21 @@ async function boot() {
   document.querySelectorAll<HTMLButtonElement>('[data-add]').forEach((btn) =>
     btn.addEventListener('click', () => add(Number(btn.dataset.add))),
   );
+  // Custom amount
+  const amountDlg = $<HTMLDialogElement>('amountDlg');
+  const amountInput = $<HTMLInputElement>('fAmount');
+  $('customBtn').addEventListener('click', () => {
+    sound.unlock();
+    amountInput.value = '';
+    amountDlg.returnValue = '';
+    amountDlg.showModal();
+    setTimeout(() => amountInput.focus(), 50);
+  });
+  amountDlg.addEventListener('close', () => {
+    const n = Math.round(Number(amountInput.value));
+    if (amountDlg.returnValue === 'add' && n > 0) add(Math.min(n, 10_000_000));
+  });
+
   $('shakeBtn').addEventListener('click', () => {
     sound.unlock();
     shake(1, true);
@@ -769,6 +782,7 @@ async function boot() {
   wrap.addEventListener('pointercancel', endDrag);
   window.addEventListener('keydown', (e) => {
     sound.unlock();
+    if ((e.target as HTMLElement).closest?.('input, dialog')) return;
     if (e.code === 'ArrowLeft') keyTilt = -1.1;
     else if (e.code === 'ArrowRight') keyTilt = 1.1;
     else if (e.code === 'Space' && !e.repeat) shake(1, true);
@@ -814,7 +828,7 @@ async function boot() {
     if (slide || id === state.current) return;
     slide = { t: 0, dir, to: id, keepOld };
     sound.unlock();
-    sound.chime(dir > 0 ? 7 : 0, 0.12, dir * 0.5);
+    sound.clink(0.12, dir * 0.5);
   }
   function step(dir: number) {
     const i = state.banks.findIndex((b) => b.id === state.current);

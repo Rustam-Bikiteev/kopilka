@@ -17,7 +17,7 @@ export class Sound {
   private master: GainNode;
   private send: GainNode;
   private buffers: Record<ImpactKind, AudioBuffer[]>;
-  private bell: AudioBuffer;
+  private jingleBufs: AudioBuffer[];
   private voices = 0;
   private unlocked = false;
   muteUntil = 0;
@@ -42,13 +42,13 @@ export class Sound {
     comp.connect(ctx.destination);
 
     this.master = ctx.createGain();
-    this.master.gain.value = 0.9;
+    this.master.gain.value = 0.7;
     this.master.connect(comp);
 
     const verb = ctx.createConvolver();
-    verb.buffer = this.impulse(1.1);
+    verb.buffer = this.impulse(0.7);
     this.send = ctx.createGain();
-    this.send.gain.value = 0.22;
+    this.send.gain.value = 0.1;
     this.send.connect(verb);
     verb.connect(this.master);
 
@@ -57,19 +57,7 @@ export class Sound {
       glass: Array.from({ length: 8 }, () => this.glassBuffer()),
       thud: Array.from({ length: 6 }, () => this.thudBuffer()),
     };
-    this.bell = this.buffer(
-      1.6,
-      [
-        { f: 1046.5, a: 1, tau: 0.9 },
-        { f: 1046.5 * 1.003, a: 0.4, tau: 0.8 },
-        { f: 2093, a: 0.45, tau: 0.55 },
-        { f: 3150, a: 0.3, tau: 0.32 },
-        { f: 4290, a: 0.16, tau: 0.2 },
-        { f: 5680, a: 0.1, tau: 0.12 },
-      ],
-      0.15,
-      0.001,
-    );
+    this.jingleBufs = Array.from({ length: 8 }, () => this.jingleBuffer());
   }
 
   unlock() {
@@ -88,40 +76,40 @@ export class Sound {
     if (this.voices >= MAX_VOICES && strength < 0.7) return;
     if (this.voices >= MAX_VOICES + 6) return;
     const list = this.buffers[kind];
-    const level = kind === 'coin' ? 0.5 : kind === 'glass' ? 0.62 : 0.8;
+    const level = kind === 'coin' ? 0.42 : kind === 'glass' ? 0.4 : 0.6;
     this.play(
       list[(Math.random() * list.length) | 0],
       0.93 + Math.random() * 0.14,
       (0.04 + Math.pow(strength, 1.35) * 0.96) * level,
       pan,
-      1500 + strength * strength * 17000,
+      1200 + strength * strength * 5800,
     );
   }
 
-  /** Bell note `semis` semitones above C6. */
-  chime(semis: number, gain = 0.3, pan = 0, delay = 0) {
+  /** One soft coin clink, `pitch` in semitones around the base sound. */
+  clink(gain = 0.25, pan = 0, delay = 0, pitch = 0) {
     if (this.ctx.state !== 'running') return;
-    this.play(this.bell, Math.pow(2, semis / 12), gain, pan, 20000, delay);
+    const buf = this.jingleBufs[(Math.random() * this.jingleBufs.length) | 0];
+    this.play(buf, Math.pow(2, pitch / 12) * (0.96 + Math.random() * 0.08), gain, pan, 6000, delay);
   }
 
-  /** Rising sparkle for the rare coin. */
-  fanfare() {
-    [0, 4, 7, 12, 16, 19, 24].forEach((s, k) => this.chime(s + 2, 0.34 - k * 0.025, (k % 2 ? 1 : -1) * 0.3, k * 0.065));
-    this.chime(31, 0.18, 0, 0.5);
-  }
-
-  /** Milestone jingle; `level` 1..4 for 25/50/75/100%. */
-  milestone(level: number) {
-    const run = [0, 4, 7, 12, 16, 19, 24, 28].slice(0, 3 + level);
-    run.forEach((s, k) => this.chime(s - 5, 0.3, (k % 2 ? 1 : -1) * 0.25, k * 0.07));
-    const end = run.length * 0.07;
-    if (level >= 4) {
-      [-5, -1, 2, 7].forEach((s) => this.chime(s, 0.2, 0, end + 0.05));
-      [7, 11, 14, 19].forEach((s) => this.chime(s, 0.2, 0, end + 0.45));
-      this.chime(31, 0.16, 0, end + 0.85);
-    } else {
-      this.chime(run[run.length - 1] + 7, 0.18, 0, end + 0.08);
+  /** A handful of coins settling: `count` clinks spread over `spread` seconds. */
+  jingle(count: number, gain = 0.22, spread = 0.5) {
+    for (let k = 0; k < count; k++) {
+      const t = Math.pow(k / Math.max(1, count - 1), 1.4) * spread + Math.random() * 0.03;
+      this.clink(gain * (1 - (k / count) * 0.5), (Math.random() - 0.5) * 0.6, t, (Math.random() - 0.5) * 3);
     }
+  }
+
+  /** Rare coin: a slightly longer, brighter handful. */
+  fanfare() {
+    this.jingle(9, 0.26, 0.7);
+  }
+
+  /** Milestone; `level` 1..4 for 25/50/75/100%. */
+  milestone(level: number) {
+    this.jingle(4 + level * 3, 0.24, 0.5 + level * 0.25);
+    if (level >= 4) setTimeout(() => this.jingle(12, 0.18, 1), 700);
   }
 
   private play(buf: AudioBuffer, rate: number, gain: number, pan: number, cutoff: number, delay = 0) {
@@ -196,28 +184,37 @@ export class Sound {
     return out;
   }
 
+  // Coin sounds sit an octave lower than a bell and die out fast: a "chink", not a ring.
   private coinBuffer() {
-    const f0 = 2700 + Math.random() * 2200;
+    const f0 = 1500 + Math.random() * 900;
     return this.buffer(
-      0.9,
-      this.partials(f0, [1, 1.46, 2.13, 2.76, 3.58, 4.62], [1, 0.8, 0.6, 0.45, 0.3, 0.2], [0.34, 0.24, 0.17, 0.12, 0.08, 0.05], 0.0045),
-      0.35,
-      0.0018,
+      0.4,
+      this.partials(f0, [1, 1.46, 2.13, 2.76], [1, 0.55, 0.3, 0.15], [0.11, 0.07, 0.045, 0.03], 0.004),
+      0.18,
+      0.0012,
     );
   }
 
+  /** Coin tapping the jar: a dull tock with a little metal on top. */
   private glassBuffer() {
-    const f0 = 1350 + Math.random() * 1000;
-    const glass = this.partials(f0, [1, 2.32, 4.25, 6.63], [1, 0.45, 0.25, 0.12], [0.6, 0.3, 0.16, 0.08], 0.002);
-    const coin = this.partials(3200 + Math.random() * 1500, [1, 1.46, 2.13], [0.55, 0.4, 0.3], [0.09, 0.07, 0.05]);
-    return this.buffer(1.1, [...glass, ...coin], 0.5, 0.0022);
+    const f0 = 700 + Math.random() * 300;
+    const body = this.partials(f0, [1, 2.3], [1, 0.3], [0.07, 0.035]);
+    const coin = this.partials(1700 + Math.random() * 700, [1, 1.46], [0.35, 0.2], [0.05, 0.035]);
+    return this.buffer(0.35, [...body, ...coin], 0.12, 0.0015);
   }
 
   private thudBuffer() {
-    const f0 = 620 + Math.random() * 320;
-    const body = this.partials(f0, [1, 2.8, 5.1], [1, 0.4, 0.2], [0.22, 0.1, 0.05]);
-    const coin = this.partials(3000 + Math.random() * 1800, [1, 1.46, 2.13, 2.76], [0.7, 0.5, 0.35, 0.25], [0.16, 0.11, 0.08, 0.06], 0.004);
-    return this.buffer(0.9, [...body, ...coin], 0.6, 0.004);
+    const f0 = 180 + Math.random() * 120;
+    const body = this.partials(f0, [1, 2.4], [1, 0.3], [0.06, 0.03]);
+    const coin = this.partials(1400 + Math.random() * 600, [1, 1.46, 2.13], [0.45, 0.25, 0.12], [0.07, 0.05, 0.03], 0.004);
+    return this.buffer(0.35, [...body, ...coin], 0.2, 0.003);
+  }
+
+  /** Two coins touching: a pair of close soft chinks. */
+  private jingleBuffer() {
+    const a = this.partials(1800 + Math.random() * 700, [1, 1.46, 2.13], [1, 0.45, 0.2], [0.16, 0.1, 0.06], 0.003);
+    const b = this.partials(2000 + Math.random() * 700, [1, 1.46], [0.5, 0.25], [0.12, 0.08]);
+    return this.buffer(0.6, [...a, ...b], 0.1, 0.001);
   }
 
   private impulse(dur: number) {

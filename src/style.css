@@ -148,10 +148,10 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 }
 .controls button, .controls .chips { pointer-events: auto; }
 
-.chips { display: flex; gap: 8px; }
+.chips { display: flex; gap: 6px; }
 .chip {
-  font-family: var(--font-num); font-weight: 700; font-size: 14px;
-  padding: 10px 14px; border-radius: 999px;
+  font-family: var(--font-num); font-weight: 700; font-size: 13px;
+  padding: 10px 11px; border-radius: 999px;
   background: var(--glass); border: 1px solid var(--line);
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
   transition: transform 0.12s, background 0.2s;
@@ -167,7 +167,6 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 }
 .side-btn svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 button.side-btn:active { transform: scale(0.9); color: var(--text); }
-.side-btn.hint { opacity: 0.7; }
 
 .pour { position: relative; width: 92px; height: 92px; border-radius: 50%; touch-action: none; }
 .pour-coin {

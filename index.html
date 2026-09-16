@@ -49,6 +49,7 @@
         <button class="chip" data-add="50">+50</button>
         <button class="chip" data-add="100">+100</button>
         <button class="chip" data-add="500">+500</button>
+        <button id="customBtn" class="chip">Своя</button>
       </div>
       <div class="main-row">
         <button id="shakeBtn" class="side-btn">
@@ -59,10 +60,7 @@
           <span class="pour-coin"><b>₽</b></span>
           <span id="pourCount" class="pour-count"></span>
         </button>
-        <div class="side-btn hint">
-          <svg viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 20h14"/></svg>
-          <span>Держи,<br />чтобы сыпать</span>
-        </div>
+        <span aria-hidden="true"></span>
       </div>
     </footer>
 
@@ -85,6 +83,17 @@
         </div>
       </div>
     </div>
+
+    <dialog id="amountDlg">
+      <form method="dialog" class="sheet">
+        <h2>Своя сумма</h2>
+        <label>Сколько положить, ₽<input id="fAmount" type="number" inputmode="numeric" min="1" step="1" placeholder="Например, 2500" /></label>
+        <div class="sheet-actions">
+          <button value="cancel" class="ghost" formnovalidate>Отмена</button>
+          <button value="add" class="primary">Положить</button>
+        </div>
+      </form>
+    </dialog>
 
     <dialog id="settings">
       <form method="dialog" class="sheet">
